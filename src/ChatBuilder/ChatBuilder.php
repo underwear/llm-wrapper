@@ -1,6 +1,9 @@
 <?php
 
-namespace Underwear\LlmWrapper;
+namespace Underwear\LlmWrapper\ChatBuilder;
+
+use Underwear\LlmWrapper\LlmClient;
+use Underwear\LlmWrapper\LlmResponse\LlmResponse;
 
 class ChatBuilder
 {
@@ -8,11 +11,11 @@ class ChatBuilder
     private ?string $model = null;
     private ?float $temperature = null;
     private array $functions = [];
-    private ?string $functionCallMode = null;
+    private null|array|string $functionCallMode = null;
 
-    public static function make(): self
-    {
-        return new self();
+    public function __construct(
+        private readonly LlmClient $llmClient,
+    ) {
     }
 
     public function model(string $model): self
@@ -53,7 +56,7 @@ class ChatBuilder
         return $this;
     }
 
-    public function functionCall(string $mode): self
+    public function functionCall(null|string|array $mode): self
     {
         $this->functionCallMode = $mode;
         return $this;
@@ -79,5 +82,35 @@ class ChatBuilder
         }
 
         return $payload;
+    }
+
+    public function send(): LlmResponse
+    {
+        return $this->llmClient->send($this);
+    }
+
+    public function getMessages(): array
+    {
+        return $this->messages;
+    }
+
+    public function getModel(): ?string
+    {
+        return $this->model;
+    }
+
+    public function getTemperature(): ?float
+    {
+        return $this->temperature;
+    }
+
+    public function getFunctions(): array
+    {
+        return $this->functions;
+    }
+
+    public function getFunctionCallMode(): null|string|array
+    {
+        return $this->functionCallMode;
     }
 }

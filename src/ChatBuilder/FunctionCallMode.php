@@ -1,6 +1,6 @@
 <?php
 
-namespace Underwear\LlmWrapper;
+namespace Underwear\LlmWrapper\ChatBuilder;
 
 class FunctionCallMode
 {

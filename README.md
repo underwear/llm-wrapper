@@ -1,229 +1,191 @@
-# LLM Wrapper
+# 🤖 LLM Wrapper
 
-A fluent PHP wrapper for LLM APIs with function calling support. Build type-safe, readable interactions with OpenAI and
-other LLM providers.
+A clean and flexible PHP wrapper designed to simplify interactions with LLM like OpenAI GPT and Anthropic Claude.
 
-## Installation
+## 📦 Installation
+
+Install via Composer:
 
 ```bash
 composer require underwear/llm-wrapper
 ```
 
-## Requirements
+## 🚀 Quick Start
 
-- PHP 8.0 or higher
+### Using OpenAI GPT
 
-## Quick Start
+Initialize the client and send your first request:
 
 ```php
-use Underwear\LlmWrapper\ChatBuilder;
-use Underwear\LlmWrapper\FunctionBuilder;
-use Underwear\LlmWrapper\FunctionParam;
-use Underwear\LlmWrapper\FunctionCallMode;
+use Underwear\LlmWrapper\LlmClient;
 
-$payload = ChatBuilder::make()
+$client = LlmClient::openai(['api_key' => 'your-key']);
+
+$response = $client->chat()
     ->model('gpt-4')
-    ->temperature(0.7)
-    ->system('You are a helpful assistant.')
-    ->user('What is the weather like?')
-    ->toArray();
+    ->user('What is the capital of Germany?')
+    ->send();
 
-// Send to your LLM API
-// $response = $openai->chat()->create($payload);
+echo $response->text(); // Berlin
 ```
 
-## Function Calling
+### Using Anthropic Claude
 
-Define functions with a clean, type-safe API:
+Quick setup for Anthropic Claude:
 
 ```php
-$payload = ChatBuilder::make()
-    ->model('gpt-4')
-    ->system('You are a product management assistant.')
-    ->user('Create a new product.')
-    ->function('createProduct', function (FunctionBuilder $fn) {
-        $fn->description('Creates a new product in the system')
-            ->param(
-                FunctionParam::string('name')
-                    ->description('Product name')
-                    ->required()
-            )
-            ->param(
-                FunctionParam::int('price')
-                    ->description('Price in cents')
-                    ->min(100)
-                    ->max(100000)
-                    ->required()
-            )
-            ->param(
-                FunctionParam::string('category')
-                    ->description('Product category')
-                    ->enum(['books', 'clothing', 'electronics'])
-                    ->required()
-            );
+use Underwear\LlmWrapper\LlmClient;
+
+$client = LlmClient::claude(['api_key' => 'your-key']);
+
+$response = $client->chat()
+    ->user('Explain photosynthesis in simple terms.')
+    ->send();
+
+echo $response->text();
+```
+
+## 📚Chat Examples (from Basic to Advanced)
+
+### 1. Simple Chat Message
+
+```php
+$response = $client->chat()
+    ->user('Who wrote "1984"?')
+    ->send();
+
+echo $response->text(); // George Orwell
+
+```
+
+### 2. Contextual Conversations
+
+Chain messages for contextual responses:
+
+```php
+$chat = $client->chat()
+    ->system('You are a helpful historian.')
+    ->user('Who discovered penicillin?')
+    ->assistant('Alexander Fleming discovered penicillin in 1928.')
+    ->user('Tell me more about his discovery.');
+
+$response = $chat->send();
+
+echo $response->text();
+```
+
+### 3. Customizing Model and Temperature
+
+Adjust parameters for creative or precise responses:
+
+```php
+$response = $client->chat()
+    ->model('gpt-4.1-mini')
+    ->temperature(0.9)
+    ->user('Write a short poem about the sea.')
+    ->send();
+
+echo $response->text();
+```
+
+## 🛠️ Advanced Function Calling
+
+Define and invoke custom functions the LLM can call:
+
+### 1. Simple Function Definition
+
+```php
+use Underwear\LlmWrapper\ChatBuilder\FunctionCallMode;
+
+$response = $client->chat()
+    ->system('You are generator of random profiles')
+    ->function('createProfile', function ($f) {
+        $f->stringParam('firstName')->required();
+        $f->stringParam('lastName')->required();
+        $f->intParam('age')->min(18)->max(30)->required();
+    })
+    ->functionCall(FunctionCallMode::specific('createProfile'))
+    ->send();
+
+$firstName = $response->function('createProfile')->get('firstName');
+echo "Generated name: {$firstName}";
+```
+
+### 2. Multi-functions
+
+```php
+use Underwear\LlmWrapper\ChatBuilder\FunctionBuilder;
+use Underwear\LlmWrapper\ChatBuilder\FunctionCallMode;
+use Underwear\LlmWrapper\ChatBuilder\FunctionParam;
+use Underwear\LlmWrapper\ChatBuilder\ObjectProp;
+
+$response = $client->chat()
+    ->system('You are an assistant capable of creating users and sending notifications.')
+    ->user('Now we need to create a user')
+    ->function('create_user', function (FunctionBuilder $f) {
+        $f->description('Creates a new user account.');
+        $f->param(FunctionParam::string('username')->required());
+        $f->param(FunctionParam::object('profile')->props([
+            ObjectProp::string('first_name')->required(),
+            ObjectProp::string('last_name')->required(),
+            ObjectProp::int('age')->min(18),
+        ]));
+    })
+    ->function('send_notification', function (FunctionBuilder $f) {
+        $f->description('Send a notification message to the user.');
+        $f->param(FunctionParam::string('message')->required());
+        $f->param(FunctionParam::string('priority')->enum(['low', 'medium', 'high']));
     })
     ->functionCall(FunctionCallMode::auto())
-    ->toArray();
+    ->send();
+
+if ($response->hasFunctionCalls()) {
+    if ($response->called('create_user')) {
+        $args = $response->function('create_user')->getArguments();
+        // do something here...
+    }
+    
+    if ($response->called('send_notification')) {
+        $args = $response->function('send_notification')->getArguments();
+        // do something here...
+    }
+}
 ```
 
-## Advanced Examples
+### 3. Working with Arrays in Function Parameters
 
-### Working with Arrays
-
-```php
-// Array of strings
-->param(
-    FunctionParam::arrayOf(
-        FunctionParam::string('tag')->description('Tag')
-    )->description('List of tags')
-)
-
-// Array of objects
-->param(
-    FunctionParam::arrayOf(
-        FunctionParam::object('variant')->props([
-            FunctionParam::string('sku')->description('SKU')->required(),
-            FunctionParam::int('stock')->description('Stock quantity')->required(),
-        ])
-    )->description('Product variants')
-)
-```
-
-### Nested Objects
+The wrapper provides powerful array handling capabilities with `arrayOf()` method and convenient shortcuts:
 
 ```php
-->param(
-    FunctionParam::object('dimensions')
-        ->description('Product dimensions')
-        ->props([
-            FunctionParam::float('width')->description('Width in cm')->required(),
-            FunctionParam::float('height')->description('Height in cm')->required(),
-            FunctionParam::float('depth')->description('Depth in cm')->required(),
-        ])
-)
-```
+use Underwear\LlmWrapper\ChatBuilder\FunctionBuilder;
+use Underwear\LlmWrapper\ChatBuilder\FunctionParam;
 
-### Complete Example
-
-```php
-use Underwear\LlmWrapper\ChatBuilder;
-use Underwear\LlmWrapper\FunctionBuilder;
-use Underwear\LlmWrapper\FunctionParam;
-use Underwear\LlmWrapper\FunctionCallMode;
-
-$payload = ChatBuilder::make()
-    ->model('gpt-4')
-    ->temperature(0.7)
-    ->system('You are a product management assistant.')
-    ->user('Create a new laptop product.')
-    ->function('createProduct', function (FunctionBuilder $fn) {
-        $dimensionsObj = FunctionParam::object('dimensions')
-            ->description('Dimensions')
-            ->props([
-                FunctionParam::float('width')->description('Width in cm')->required(),
-                FunctionParam::float('height')->description('Height in cm')->required(),
-                FunctionParam::float('depth')->description('Depth in cm')->required(),
-            ]);
-
-        $fn->description('Creates a new product in the system')
-            ->param(
-                FunctionParam::string('name')
-                    ->description('Product name')
-                    ->required()
-            )
-            ->param(
-                FunctionParam::int('price')
-                    ->description('Price in cents')
-                    ->min(100)
-                    ->max(100000)
-                    ->required()
-            )
-            ->param(
-                FunctionParam::string('category')
-                    ->description('Product category')
-                    ->enum(['books', 'clothing', 'electronics'])
-                    ->required()
-            )
-            ->param(
-                FunctionParam::arrayOf(
-                    FunctionParam::string('tag')->description('Tag')
-                )->description('List of tags')
-            )
-            ->param(
-                FunctionParam::arrayOf(
-                    FunctionParam::object('variant')->props([
-                        FunctionParam::string('sku')->description('SKU')->required(),
-                        FunctionParam::int('stock')->description('Stock quantity')->required(),
-                    ])
-                )->description('Product variants')
-            )
-            ->param($dimensionsObj);
+$response = $client->chat()
+    ->system('You are a shopping assistant that helps organize grocery lists.')
+    ->user('Create a grocery list with 5 fruits and their estimated prices')
+    ->function('create_grocery_list', function (FunctionBuilder $f) {
+        $f->description('Creates a structured grocery list');
+        
+        // Array of strings - using convenience method
+        $f->param(FunctionParam::stringArray('fruits')->minItems(3)->maxItems(10));
+        
+        // Array of numbers - using arrayOf method
+        $f->param(FunctionParam::array('prices')
+            ->arrayOf(FunctionParam::float('price'))
+            ->minItems(3)
+            ->maxItems(10)
+        );
+        
+        // Array of integers
+        $f->param(FunctionParam::intArray('quantities')->required());
     })
     ->functionCall(FunctionCallMode::auto())
-    ->toArray();
+    ->send();
 
-// The payload is now ready to send to OpenAI
-// $response = $openai->chat()->create($payload);
+if ($response->called('create_grocery_list')) {
+    $args = $response->function('create_grocery_list')->getArguments();
+    $fruits = $args['fruits']; // ['apple', 'banana', 'orange', ...]
+    $prices = $args['prices']; // [1.99, 0.89, 2.50, ...]
+    $quantities = $args['quantities']; // [5, 10, 3, ...]
+}
 ```
-
-## API Reference
-
-### ChatBuilder
-
-| Method                                       | Description                       |
-|----------------------------------------------|-----------------------------------|
-| `make()`                                     | Create a new ChatBuilder instance |
-| `model(string $model)`                       | Set the model (e.g., 'gpt-4')     |
-| `temperature(float $temp)`                   | Set temperature (0.0-2.0)         |
-| `system(string $content)`                    | Add system message                |
-| `user(string $content)`                      | Add user message                  |
-| `assistant(string $content)`                 | Add assistant message             |
-| `function(string $name, callable $callback)` | Define a function                 |
-| `functionCall(string $mode)`                 | Set function call mode            |
-| `toArray()`                                  | Build the final payload           |
-
-### FunctionParam
-
-| Method                         | Description              |
-|--------------------------------|--------------------------|
-| `string(string $name)`         | Create string parameter  |
-| `int(string $name)`            | Create integer parameter |
-| `float(string $name)`          | Create float parameter   |
-| `bool(string $name)`           | Create boolean parameter |
-| `object(string $name)`         | Create object parameter  |
-| `arrayOf(FunctionParam $type)` | Create array parameter   |
-| `description(string $desc)`    | Set description          |
-| `required()`                   | Mark as required         |
-| `enum(array $values)`          | Set allowed values       |
-| `min(int $min)`                | Set minimum value        |
-| `max(int $max)`                | Set maximum value        |
-| `props(array $properties)`     | Set object properties    |
-
-### FunctionCallMode
-
-| Constant                                   | Description              |
-|--------------------------------------------|--------------------------|
-| `FunctionCallMode::auto()`                 | Let the model decide     |
-| `FunctionCallMode::none()`                 | Disable function calling |
-| `FunctionCallMode::specific(string $name)` | Force specific function  |
-
-## Testing
-
-```bash
-# Run tests
-composer test
-
-# Fix code style
-composer cs-fix
-
-# Run static analysis
-composer analyze
-```
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Author
-
-- **underwear** - [GitHub](https://github.com/underwear)
