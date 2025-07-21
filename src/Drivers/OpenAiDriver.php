@@ -20,7 +20,7 @@ class OpenAiDriver implements LlmDriverInterface
 {
     private const API_BASE_URL = 'https://api.openai.com/v1';
     private const DEFAULT_MODEL = 'gpt-4.1';
-    private const TIMEOUT = 30.0;
+    private const TIMEOUT = 60.0;
 
     private array $config = [];
     private ?string $defaultModel = null;
