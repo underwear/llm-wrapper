@@ -12,6 +12,9 @@ use Underwear\LlmWrapper\LlmResponse\LlmResponse;
 
 class LlmClient
 {
+    /** @var array<callable(ChatBuilder, LlmResponse, self): void> */
+    private array $afterSendHooks = [];
+
     public function __construct(
         private readonly LlmDriverInterface $driver,
     ) {
@@ -64,6 +67,27 @@ class LlmClient
 
     public function send(ChatBuilder $chatBuilder): LlmResponse
     {
-        return $this->driver->sendRequest($chatBuilder);
+        $response = $this->driver->sendRequest($chatBuilder);
+
+        // hooks
+        foreach ($this->afterSendHooks as $hook) {
+            $hook($chatBuilder, $response, $this);
+        }
+
+        return $response;
+    }
+
+    public function after(callable $callback): self
+    {
+        $this->afterSendHooks[] = $callback;
+        return $this;
+    }
+
+    public function afterMany(callable ...$callbacks): self
+    {
+        foreach ($callbacks as $cb) {
+            $this->after($cb);
+        }
+        return $this;
     }
 }
