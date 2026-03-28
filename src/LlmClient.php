@@ -7,6 +7,7 @@ namespace Underwear\LlmWrapper;
 use GuzzleHttp\ClientInterface;
 use Underwear\LlmWrapper\ChatBuilder\ChatBuilder;
 use Underwear\LlmWrapper\Drivers\AnthropicDriver;
+use Underwear\LlmWrapper\Drivers\KieAiDriver;
 use Underwear\LlmWrapper\Drivers\OpenAiDriver;
 use Underwear\LlmWrapper\LlmResponse\LlmResponse;
 
@@ -29,6 +30,7 @@ class LlmClient
         $driver = match ($provider) {
             'openai' => new OpenAiDriver(),
             'anthropic' => new AnthropicDriver(),
+            'kie' => new KieAiDriver(),
             default => throw new \InvalidArgumentException("Unsupported provider: {$provider}")
         };
 
@@ -58,6 +60,11 @@ class LlmClient
     public static function claude(array $config = [], ?string $model = null): self
     {
         return self::anthropic($config, $model);
+    }
+
+    public static function kie(array $config = [], ?string $model = null): self
+    {
+        return self::make('kie', $config, $model);
     }
 
     public function chat(): ChatBuilder
