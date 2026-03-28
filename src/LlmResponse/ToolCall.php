@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Underwear\LlmWrapper\LlmResponse;
 
-class FunctionCall
+class ToolCall
 {
     public function __construct(
         private readonly string $name,

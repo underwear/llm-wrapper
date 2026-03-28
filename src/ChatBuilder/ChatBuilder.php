@@ -10,8 +10,9 @@ class ChatBuilder
     private array $messages = [];
     private ?string $model = null;
     private ?float $temperature = null;
-    private array $functions = [];
-    private null|array|string $functionCallMode = null;
+    private ?int $maxTokens = null;
+    private array $tools = [];
+    private null|array|string $toolChoice = null;
 
     public function __construct(
         private readonly LlmClient $llmClient,
@@ -27,6 +28,12 @@ class ChatBuilder
     public function temperature(float $temperature): self
     {
         $this->temperature = $temperature;
+        return $this;
+    }
+
+    public function maxTokens(int $maxTokens): self
+    {
+        $this->maxTokens = $maxTokens;
         return $this;
     }
 
@@ -48,17 +55,24 @@ class ChatBuilder
         return $this;
     }
 
-    public function function(string $name, callable $callback): self
+    public function tool(string|ToolBuilder $nameOrBuilder, ?callable $callback = null): self
     {
-        $builder = new FunctionBuilder($name);
-        $callback($builder);
-        $this->functions[] = $builder->toArray();
+        if ($nameOrBuilder instanceof ToolBuilder) {
+            $this->tools[] = $nameOrBuilder->toSchema();
+            return $this;
+        }
+
+        $builder = new ToolBuilder($nameOrBuilder);
+        if ($callback !== null) {
+            $callback($builder);
+        }
+        $this->tools[] = $builder->toSchema();
         return $this;
     }
 
-    public function functionCall(null|string|array $mode): self
+    public function toolChoice(null|string|array $mode): self
     {
-        $this->functionCallMode = $mode;
+        $this->toolChoice = $mode;
         return $this;
     }
 
@@ -73,12 +87,16 @@ class ChatBuilder
             $payload['temperature'] = $this->temperature;
         }
 
-        if (!empty($this->functions)) {
-            $payload['functions'] = $this->functions;
+        if ($this->maxTokens !== null) {
+            $payload['max_tokens'] = $this->maxTokens;
         }
 
-        if ($this->functionCallMode !== null) {
-            $payload['function_call'] = $this->functionCallMode;
+        if (!empty($this->tools)) {
+            $payload['tools'] = $this->tools;
+        }
+
+        if ($this->toolChoice !== null) {
+            $payload['tool_choice'] = $this->toolChoice;
         }
 
         return $payload;
@@ -104,13 +122,18 @@ class ChatBuilder
         return $this->temperature;
     }
 
-    public function getFunctions(): array
+    public function getMaxTokens(): ?int
     {
-        return $this->functions;
+        return $this->maxTokens;
     }
 
-    public function getFunctionCallMode(): null|string|array
+    public function getTools(): array
     {
-        return $this->functionCallMode;
+        return $this->tools;
+    }
+
+    public function getToolChoice(): null|string|array
+    {
+        return $this->toolChoice;
     }
 }

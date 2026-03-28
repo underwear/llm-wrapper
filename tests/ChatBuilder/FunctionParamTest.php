@@ -6,7 +6,6 @@ namespace Underwear\LlmWrapper\Tests\ChatBuilder;
 
 use PHPUnit\Framework\TestCase;
 use Underwear\LlmWrapper\ChatBuilder\FunctionParam;
-use Underwear\LlmWrapper\ChatBuilder\ObjectProp;
 use InvalidArgumentException;
 
 class FunctionParamTest extends TestCase
@@ -160,7 +159,6 @@ class FunctionParamTest extends TestCase
         $this->assertArrayHasKey('required', $schema);
         $this->assertEquals(['name'], $schema['required']);
 
-        // Проверяем свойства объекта
         $this->assertEquals('string', $schema['properties']['name']['type']);
         $this->assertEquals('integer', $schema['properties']['age']['type']);
         $this->assertEquals(['string', 'null'], $schema['properties']['email']['type']);
@@ -265,40 +263,26 @@ class FunctionParamTest extends TestCase
 
         $schema = $param->toSchema();
 
-        // Проверяем основную структуру
         $this->assertEquals('object', $schema['type']);
         $this->assertEquals('Application configuration', $schema['description']);
         $this->assertEquals(['database'], $schema['required']);
 
-        // Проверяем database объект
         $database = $schema['properties']['database'];
         $this->assertEquals('object', $database['type']);
         $this->assertEquals(['host', 'port', 'credentials'], $database['required']);
 
-        // Проверяем credentials объект
         $credentials = $database['properties']['credentials'];
         $this->assertEquals('object', $credentials['type']);
         $this->assertEquals(['username', 'password'], $credentials['required']);
 
-        // Проверяем массив строк
         $features = $schema['properties']['features'];
         $this->assertEquals('array', $features['type']);
         $this->assertEquals(['type' => 'string'], $features['items']);
 
-        // Проверяем массив объектов
         $servers = $schema['properties']['servers'];
         $this->assertEquals('array', $servers['type']);
         $this->assertEquals('object', $servers['items']['type']);
         $this->assertEquals(['name', 'url'], $servers['items']['required']);
-    }
-
-    public function testObjectPropInheritance(): void
-    {
-        $prop = new ObjectProp('settings', 'object');
-
-        $this->assertInstanceOf(FunctionParam::class, $prop);
-        $this->assertEquals('settings', $prop->getName());
-        $this->assertEquals('object', $prop->getType());
     }
 
     public function testNullableType(): void

@@ -1,53 +1,57 @@
-# 🤖 LLM Wrapper
+# LLM Wrapper
 
-A clean and flexible PHP wrapper designed to simplify interactions with LLM like OpenAI GPT and Anthropic Claude.
+[![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-8892BF.svg)](https://php.net/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## 📦 Installation
+Fluent PHP wrapper for LLM APIs. One interface for OpenAI, Anthropic Claude, and Kie.ai — with tool calling, structured parameters, and response normalization.
 
-Install via Composer:
+```php
+$response = LlmClient::openai(['api_key' => 'sk-...'])
+    ->chat()
+    ->system('You are a helpful assistant.')
+    ->user('What is the capital of France?')
+    ->send();
+
+echo $response->text(); // Paris
+```
+
+## Why?
+
+- **One API for all providers** — switch between OpenAI, Claude, and Kie.ai by changing one line
+- **Fluent builder** — readable, chainable, IDE-friendly
+- **Tool calling** — type-safe parameter definitions with JSON Schema generation
+- **Reusable tools** — define once, use across multiple chats
+- **Normalized responses** — consistent `stopReason`, `usage`, and `toolCalls` across providers
+
+## Installation
 
 ```bash
 composer require underwear/llm-wrapper
 ```
 
-## 🚀 Quick Start
+Requires PHP 8.1+.
 
-### Using OpenAI GPT
-
-Initialize the client and send your first request:
+## Quick Start
 
 ```php
 use Underwear\LlmWrapper\LlmClient;
 
-$client = LlmClient::openai(['api_key' => 'your-key']);
+// OpenAI
+$client = LlmClient::openai(['api_key' => 'sk-...']);
 
-$response = $client->chat()
-    ->model('gpt-4')
-    ->user('What is the capital of Germany?')
-    ->send();
+// Anthropic Claude
+$client = LlmClient::claude(['api_key' => 'sk-ant-...']);
 
-echo $response->text(); // Berlin
+// Kie.ai
+$client = LlmClient::kie(['api_key' => '...']);
+
+// Or use the generic factory
+$client = LlmClient::make('openai', ['api_key' => 'sk-...'], model: 'gpt-4.1-mini');
 ```
 
-### Using Anthropic Claude
+## Chat
 
-Quick setup for Anthropic Claude:
-
-```php
-use Underwear\LlmWrapper\LlmClient;
-
-$client = LlmClient::claude(['api_key' => 'your-key']);
-
-$response = $client->chat()
-    ->user('Explain photosynthesis in simple terms.')
-    ->send();
-
-echo $response->text();
-```
-
-## 📚Chat Examples (from Basic to Advanced)
-
-### 1. Simple Chat Message
+### Simple Message
 
 ```php
 $response = $client->chat()
@@ -55,137 +59,215 @@ $response = $client->chat()
     ->send();
 
 echo $response->text(); // George Orwell
-
 ```
 
-### 2. Contextual Conversations
-
-Chain messages for contextual responses:
+### Multi-turn Conversation
 
 ```php
-$chat = $client->chat()
+$response = $client->chat()
     ->system('You are a helpful historian.')
     ->user('Who discovered penicillin?')
     ->assistant('Alexander Fleming discovered penicillin in 1928.')
-    ->user('Tell me more about his discovery.');
-
-$response = $chat->send();
-
-echo $response->text();
+    ->user('Tell me more about his discovery.')
+    ->send();
 ```
 
-### 3. Customizing Model and Temperature
-
-Adjust parameters for creative or precise responses:
+### Model, Temperature, Max Tokens
 
 ```php
 $response = $client->chat()
     ->model('gpt-4.1-mini')
     ->temperature(0.9)
+    ->maxTokens(1000)
     ->user('Write a short poem about the sea.')
     ->send();
-
-echo $response->text();
 ```
 
-## 🛠️ Advanced Function Calling
+## Tool Calling
 
-Define and invoke custom functions the LLM can call:
-
-### 1. Simple Function Definition
+### Inline Definition
 
 ```php
-use Underwear\LlmWrapper\ChatBuilder\FunctionCallMode;
+use Underwear\LlmWrapper\ChatBuilder\ToolChoice;
 
 $response = $client->chat()
-    ->system('You are generator of random profiles')
-    ->function('createProfile', function ($f) {
-        $f->stringParam('firstName')->required();
-        $f->stringParam('lastName')->required();
-        $f->intParam('age')->min(18)->max(30)->required();
+    ->tool('createProfile', function ($t) {
+        $t->stringParam('firstName')->required();
+        $t->stringParam('lastName')->required();
+        $t->intParam('age')->min(18)->max(60)->required();
     })
-    ->functionCall(FunctionCallMode::specific('createProfile'))
+    ->toolChoice(ToolChoice::specific('createProfile'))
     ->send();
 
-$firstName = $response->function('createProfile')->get('firstName');
-echo "Generated name: {$firstName}";
+$profile = $response->tool('createProfile');
+echo $profile->get('firstName'); // Emma
+echo $profile->lastName;         // magic property access works too
 ```
 
-### 2. Multi-functions
+### Reusable Tools
+
+Define a tool once, use it in multiple chats:
 
 ```php
-use Underwear\LlmWrapper\ChatBuilder\FunctionBuilder;
-use Underwear\LlmWrapper\ChatBuilder\FunctionCallMode;
-use Underwear\LlmWrapper\ChatBuilder\FunctionParam;
-use Underwear\LlmWrapper\ChatBuilder\ObjectProp;
+use Underwear\LlmWrapper\ChatBuilder\ToolBuilder;
 
-$response = $client->chat()
-    ->system('You are an assistant capable of creating users and sending notifications.')
-    ->user('Now we need to create a user')
-    ->function('create_user', function (FunctionBuilder $f) {
-        $f->description('Creates a new user account.');
-        $f->param(FunctionParam::string('username')->required());
-        $f->param(FunctionParam::object('profile')->props([
-            ObjectProp::string('first_name')->required(),
-            ObjectProp::string('last_name')->required(),
-            ObjectProp::int('age')->min(18),
-        ]));
-    })
-    ->function('send_notification', function (FunctionBuilder $f) {
-        $f->description('Send a notification message to the user.');
-        $f->param(FunctionParam::string('message')->required());
-        $f->param(FunctionParam::string('priority')->enum(['low', 'medium', 'high']));
-    })
-    ->functionCall(FunctionCallMode::auto())
-    ->send();
+$weatherTool = ToolBuilder::create('get_weather')
+    ->description('Get current weather for a city');
+$weatherTool->stringParam('city')->required();
+$weatherTool->stringParam('units')->enum(['celsius', 'fahrenheit']);
 
-if ($response->hasFunctionCalls()) {
-    if ($response->called('create_user')) {
-        $args = $response->function('create_user')->getArguments();
-        // do something here...
-    }
-    
-    if ($response->called('send_notification')) {
-        $args = $response->function('send_notification')->getArguments();
-        // do something here...
-    }
-}
+$london  = $client->chat()->tool($weatherTool)->user('Weather in London?')->send();
+$tokyo   = $client->chat()->tool($weatherTool)->user('Weather in Tokyo?')->send();
 ```
 
-### 3. Working with Arrays in Function Parameters
-
-The wrapper provides powerful array handling capabilities with `arrayOf()` method and convenient shortcuts:
+### Multiple Tools
 
 ```php
-use Underwear\LlmWrapper\ChatBuilder\FunctionBuilder;
+use Underwear\LlmWrapper\ChatBuilder\ToolBuilder;
+use Underwear\LlmWrapper\ChatBuilder\ToolChoice;
 use Underwear\LlmWrapper\ChatBuilder\FunctionParam;
 
 $response = $client->chat()
-    ->system('You are a shopping assistant that helps organize grocery lists.')
-    ->user('Create a grocery list with 5 fruits and their estimated prices')
-    ->function('create_grocery_list', function (FunctionBuilder $f) {
-        $f->description('Creates a structured grocery list');
-        
-        // Array of strings - using convenience method
-        $f->param(FunctionParam::stringArray('fruits')->minItems(3)->maxItems(10));
-        
-        // Array of numbers - using arrayOf method
-        $f->param(FunctionParam::array('prices')
-            ->arrayOf(FunctionParam::float('price'))
-            ->minItems(3)
-            ->maxItems(10)
-        );
-        
-        // Array of integers
-        $f->param(FunctionParam::intArray('quantities')->required());
+    ->system('You are an assistant that can create users and send notifications.')
+    ->user('Create a new user John')
+    ->tool('create_user', function (ToolBuilder $t) {
+        $t->description('Creates a new user account');
+        $t->param(FunctionParam::string('username')->required());
+        $t->param(FunctionParam::string('email')->required());
+        $t->param(FunctionParam::int('age')->min(18));
     })
-    ->functionCall(FunctionCallMode::auto())
+    ->tool('send_notification', function (ToolBuilder $t) {
+        $t->description('Send a notification');
+        $t->param(FunctionParam::string('message')->required());
+        $t->param(FunctionParam::string('priority')->enum(['low', 'medium', 'high']));
+    })
+    ->toolChoice(ToolChoice::auto())
     ->send();
 
-if ($response->called('create_grocery_list')) {
-    $args = $response->function('create_grocery_list')->getArguments();
-    $fruits = $args['fruits']; // ['apple', 'banana', 'orange', ...]
-    $prices = $args['prices']; // [1.99, 0.89, 2.50, ...]
-    $quantities = $args['quantities']; // [5, 10, 3, ...]
+if ($response->called('create_user')) {
+    $args = $response->tool('create_user')->getArguments();
+    // ['username' => 'john', 'email' => 'john@...', 'age' => 25]
 }
 ```
+
+### Tool Choice Modes
+
+```php
+use Underwear\LlmWrapper\ChatBuilder\ToolChoice;
+
+->toolChoice(ToolChoice::auto())                  // model decides
+->toolChoice(ToolChoice::required())              // must call a tool
+->toolChoice(ToolChoice::specific('tool_name'))   // must call this specific tool
+->toolChoice(ToolChoice::none())                  // no tool calls
+```
+
+## Parameter Types
+
+Build complex JSON Schema parameters with a fluent API:
+
+```php
+use Underwear\LlmWrapper\ChatBuilder\FunctionParam;
+
+// Primitives
+FunctionParam::string('name')->required()->description('User name')
+FunctionParam::int('age')->min(0)->max(120)
+FunctionParam::float('score')->min(0.0)->max(10.0)
+FunctionParam::bool('active')
+
+// Enums
+FunctionParam::string('status')->enum(['active', 'inactive', 'pending'])
+
+// Nullable
+FunctionParam::string('nickname')->nullable()
+
+// Arrays
+FunctionParam::stringArray('tags')                    // shortcut for array of strings
+FunctionParam::intArray('scores')                     // shortcut for array of integers
+FunctionParam::array('items')->arrayOf(               // custom item type
+    FunctionParam::float('price')
+)->minItems(1)->maxItems(100)
+
+// Objects
+FunctionParam::object('address')->props([
+    FunctionParam::string('street')->required(),
+    FunctionParam::string('city')->required(),
+    FunctionParam::string('zip'),
+])
+
+// Nested structures
+FunctionParam::objectArray('users', [                 // array of objects
+    FunctionParam::string('name')->required(),
+    FunctionParam::int('age'),
+])
+```
+
+## Response
+
+```php
+$response = $client->chat()->user('Hello')->send();
+
+// Content
+$response->text();           // "Hello! How can I help you?"
+$response->hasText();        // true
+
+// Tool calls
+$response->hasToolCalls();   // true/false
+$response->called('name');   // was this tool called?
+$response->tool('name');     // ToolCall object or null
+$response->tools();          // all ToolCall objects
+
+// ToolCall
+$call = $response->tool('get_weather');
+$call->get('city');          // "Paris"
+$call->get('units', 'c');   // with default value
+$call->city;                 // magic property
+$call->getArguments();       // ['city' => 'Paris', ...]
+
+// Metadata
+$response->stopReason();     // 'stop' | 'max_tokens' | 'tool_calls' | 'content_filter'
+$response->model();          // 'gpt-4.1-2025-04-14'
+$response->raw();            // raw JSON response body
+
+// Token usage
+$response->usage()->promptTokens();      // 14
+$response->usage()->completionTokens();  // 28
+$response->usage()->totalTokens();       // 42
+echo $response->usage();                 // "Usage: 42 tokens (prompt: 14, completion: 28)"
+```
+
+## Hooks
+
+Register after-send callbacks for logging, metrics, or debugging:
+
+```php
+$client->after(function ($chat, $response, $client) {
+    logger()->info('LLM request', [
+        'model'       => $response->model(),
+        'tokens'      => $response->usage()->totalTokens(),
+        'stop_reason' => $response->stopReason(),
+    ]);
+});
+
+// Register multiple at once
+$client->afterMany($loggerHook, $metricsHook, $costTrackerHook);
+```
+
+## Supported Providers
+
+| Provider | Factory | Default Model | Auth |
+|----------|---------|---------------|------|
+| OpenAI | `LlmClient::openai()` | `gpt-4.1` | Bearer token |
+| Anthropic | `LlmClient::claude()` | `claude-sonnet-4-20250514` | `x-api-key` header |
+| Kie.ai | `LlmClient::kie()` | `gpt-5-4` | Bearer token |
+
+All providers use the same fluent API. Tool calls, stop reasons, and usage stats are normalized across providers.
+
+## Testing
+
+```bash
+composer test
+```
+
+## License
+
+MIT

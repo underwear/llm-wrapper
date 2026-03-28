@@ -8,13 +8,14 @@ class LlmResponse
 {
     public function __construct(
         private string $content,
-        private array $functionCalls,
+        private array $toolCalls,
         private Usage $usage,
         private string $model,
-        private string $rawResponse
+        private string $rawResponse,
+        private string $stopReason = '',
     ) {}
 
-    // ===== Основные методы =====
+    // ===== Content =====
     public function text(): string
     {
         return $this->content;
@@ -25,35 +26,42 @@ class LlmResponse
         return !empty(trim($this->content));
     }
 
-    // ===== Function Calls =====
-    public function hasFunctionCalls(): bool
+    // ===== Tool Calls =====
+    public function hasToolCalls(): bool
     {
-        return !empty($this->functionCalls);
+        return !empty($this->toolCalls);
     }
 
-    public function called(string $functionName): bool
+    public function called(string $toolName): bool
     {
-        return isset($this->functionCalls[$functionName]);
+        return isset($this->toolCalls[$toolName]);
     }
 
-    public function function(string $functionName): ?FunctionCall
+    public function tool(string $toolName): ?ToolCall
     {
-        return $this->functionCalls[$functionName] ?? null;
+        return $this->toolCalls[$toolName] ?? null;
     }
 
-    public function functions(): array
+    public function tools(): array
     {
-        return $this->functionCalls;
+        return $this->toolCalls;
     }
 
-    // ===== JSON Helper с dot notation =====
-    public function json(string $path = null): mixed
+    // ===== Stop Reason =====
+    public function stopReason(): string
+    {
+        return $this->stopReason;
+    }
+
+    // ===== JSON Helper with dot notation =====
+    public function json(?string $path = null): mixed
     {
         $data = [
             'content' => $this->content,
-            'functions' => $this->getFunctionCallsAsArray(),
+            'tools' => $this->getToolCallsAsArray(),
             'usage' => $this->usage->toArray(),
             'model' => $this->model,
+            'stop_reason' => $this->stopReason,
         ];
 
         if ($path === null) {
@@ -80,10 +88,10 @@ class LlmResponse
     }
 
     // ===== Private helpers =====
-    private function getFunctionCallsAsArray(): array
+    private function getToolCallsAsArray(): array
     {
         $result = [];
-        foreach ($this->functionCalls as $name => $call) {
+        foreach ($this->toolCalls as $name => $call) {
             $result[$name] = [
                 'name' => $call->getName(),
                 'arguments' => $call->getArguments(),

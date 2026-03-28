@@ -14,14 +14,14 @@ use Underwear\LlmWrapper\Exceptions\LlmConfigurationException;
 use Underwear\LlmWrapper\LlmDriverInterface;
 use Underwear\LlmWrapper\LlmResponse\LlmResponse;
 use Underwear\LlmWrapper\LlmResponse\Usage;
-use Underwear\LlmWrapper\LlmResponse\FunctionCall;
+use Underwear\LlmWrapper\LlmResponse\ToolCall;
 
 class AnthropicDriver implements LlmDriverInterface
 {
     private const API_BASE_URL = 'https://api.anthropic.com/v1';
-    private const DEFAULT_MODEL = 'claude-3-7-sonnet-latest';
+    private const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
     private const API_VERSION = '2023-06-01';
-    private const TIMEOUT = 60.0; // Anthropic может быть медленнее
+    private const TIMEOUT = 60.0;
     private const MAX_TOKENS_DEFAULT = 4096;
 
     private array $config = [];
@@ -60,93 +60,102 @@ class AnthropicDriver implements LlmDriverInterface
     {
         $chatArray = $chatBuilder->toArray();
 
-        // Use model from ChatBuilder or fall back to default
         $model = $chatArray['model'] ?? $this->defaultModel ?? self::DEFAULT_MODEL;
 
-        // Transform messages for Anthropic format
-        $messages = $this->transformMessages($chatArray['messages']);
+        $messages = $this->filterNonSystemMessages($chatArray['messages']);
         $systemMessage = $this->extractSystemMessage($chatArray['messages']);
+
+        $maxTokens = $chatArray['max_tokens'] ?? $this->config['max_tokens'] ?? self::MAX_TOKENS_DEFAULT;
 
         $payload = [
             'model' => $model,
-            'max_tokens' => $this->config['max_tokens'] ?? self::MAX_TOKENS_DEFAULT,
+            'max_tokens' => $maxTokens,
             'messages' => $messages,
         ];
 
-        // Add system message if present
         if ($systemMessage !== null) {
             $payload['system'] = $systemMessage;
         }
 
-        // Add optional parameters if present
         if (isset($chatArray['temperature'])) {
             $payload['temperature'] = $chatArray['temperature'];
         }
 
-        // Transform functions to tools for Anthropic
-        if (isset($chatArray['functions']) && !empty($chatArray['functions'])) {
-            $payload['tools'] = $this->transformFunctionsToTools($chatArray['functions']);
+        if (isset($chatArray['tools']) && !empty($chatArray['tools'])) {
+            $payload['tools'] = $this->transformTools($chatArray['tools']);
         }
 
-        // Handle tool use (Anthropic doesn't have direct function_call equivalent)
-        if (isset($chatArray['function_call']) && $chatArray['function_call'] !== 'none') {
-            $payload['tool_choice'] = ['type' => 'auto'];
+        if (isset($chatArray['tool_choice'])) {
+            $toolChoice = $this->transformToolChoice($chatArray['tool_choice']);
+            if ($toolChoice !== null) {
+                $payload['tool_choice'] = $toolChoice;
+            }
         }
 
         return $payload;
     }
 
-    private function transformMessages(array $messages): array
+    private function filterNonSystemMessages(array $messages): array
     {
-        $transformed = [];
+        $filtered = [];
 
         foreach ($messages as $message) {
-            // Skip system messages - they're handled separately
             if ($message['role'] === 'system') {
                 continue;
             }
 
-            $transformed[] = [
+            $filtered[] = [
                 'role' => $message['role'],
                 'content' => $message['content'],
             ];
         }
 
-        $transformed[] = [
-            'role' => 'user',
-            'content' => 'Please do your job without asking additional questions.',
-        ];
-
-        return $transformed;
+        return $filtered;
     }
 
     private function extractSystemMessage(array $messages): ?string
     {
+        $systemParts = [];
+
         foreach ($messages as $message) {
             if ($message['role'] === 'system') {
-                return $message['content'];
+                $systemParts[] = $message['content'];
             }
         }
 
-        return null;
+        return !empty($systemParts) ? implode("\n\n", $systemParts) : null;
     }
 
-    private function transformFunctionsToTools(array $functions): array
+    private function transformTools(array $tools): array
     {
-        $tools = [];
+        $result = [];
 
-        foreach ($functions as $function) {
-            $tools[] = [
-                'name' => $function['name'],
-                'description' => $function['description'] ?? '',
-                'input_schema' => $function['parameters'] ?? [
-                        'type' => 'object',
-                        'properties' => []
-                    ],
+        foreach ($tools as $tool) {
+            $result[] = [
+                'name' => $tool['name'],
+                'description' => $tool['description'] ?? '',
+                'input_schema' => $tool['parameters'] ?? [
+                    'type' => 'object',
+                    'properties' => [],
+                ],
             ];
         }
 
-        return $tools;
+        return $result;
+    }
+
+    private function transformToolChoice(string|array $toolChoice): ?array
+    {
+        if (is_array($toolChoice) && isset($toolChoice['name'])) {
+            return ['type' => 'tool', 'name' => $toolChoice['name']];
+        }
+
+        return match ($toolChoice) {
+            'auto' => ['type' => 'auto'],
+            'required' => ['type' => 'any'],
+            'none' => null,
+            default => ['type' => 'auto'],
+        };
     }
 
     private function makeHttpRequest(array $payload): ResponseInterface
@@ -193,9 +202,8 @@ class AnthropicDriver implements LlmDriverInterface
             throw new LlmApiException('No content returned from Anthropic API');
         }
 
-        // Parse content and function calls
         $content = '';
-        $functionCalls = [];
+        $toolCalls = [];
 
         foreach ($data['content'] as $contentBlock) {
             if ($contentBlock['type'] === 'text') {
@@ -203,23 +211,31 @@ class AnthropicDriver implements LlmDriverInterface
             } elseif ($contentBlock['type'] === 'tool_use') {
                 $name = $contentBlock['name'];
                 $arguments = $contentBlock['input'] ?? [];
-                $functionCalls[$name] = new FunctionCall($name, $arguments);
+                $toolCalls[$name] = new ToolCall($name, $arguments);
             }
         }
 
-        // Parse usage
         $usage = new Usage(
             promptTokens: $data['usage']['input_tokens'] ?? 0,
             completionTokens: $data['usage']['output_tokens'] ?? 0,
             totalTokens: ($data['usage']['input_tokens'] ?? 0) + ($data['usage']['output_tokens'] ?? 0)
         );
 
+        $stopReason = match ($data['stop_reason'] ?? '') {
+            'end_turn' => 'stop',
+            'max_tokens' => 'max_tokens',
+            'tool_use' => 'tool_calls',
+            'stop_sequence' => 'stop',
+            default => $data['stop_reason'] ?? '',
+        };
+
         return new LlmResponse(
             content: $content,
-            functionCalls: $functionCalls,
+            toolCalls: $toolCalls,
             usage: $usage,
             model: $data['model'] ?? '',
-            rawResponse: $body
+            rawResponse: $body,
+            stopReason: $stopReason,
         );
     }
 

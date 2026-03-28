@@ -14,7 +14,7 @@ use Underwear\LlmWrapper\Exceptions\LlmConfigurationException;
 use Underwear\LlmWrapper\LlmDriverInterface;
 use Underwear\LlmWrapper\LlmResponse\LlmResponse;
 use Underwear\LlmWrapper\LlmResponse\Usage;
-use Underwear\LlmWrapper\LlmResponse\FunctionCall;
+use Underwear\LlmWrapper\LlmResponse\ToolCall;
 
 class OpenAiDriver implements LlmDriverInterface
 {
@@ -58,7 +58,6 @@ class OpenAiDriver implements LlmDriverInterface
     {
         $chatArray = $chatBuilder->toArray();
 
-        // Use model from ChatBuilder or fall back to default
         $model = $chatArray['model'] ?? $this->defaultModel ?? self::DEFAULT_MODEL;
 
         $payload = [
@@ -66,20 +65,56 @@ class OpenAiDriver implements LlmDriverInterface
             'messages' => $chatArray['messages'],
         ];
 
-        // Add optional parameters if present
         if (isset($chatArray['temperature'])) {
             $payload['temperature'] = $chatArray['temperature'];
         }
 
-        if (isset($chatArray['functions']) && !empty($chatArray['functions'])) {
-            $payload['functions'] = $chatArray['functions'];
+        if (isset($chatArray['max_tokens'])) {
+            $payload['max_tokens'] = $chatArray['max_tokens'];
         }
 
-        if (isset($chatArray['function_call'])) {
-            $payload['function_call'] = $chatArray['function_call'];
+        if (isset($chatArray['tools']) && !empty($chatArray['tools'])) {
+            $payload['tools'] = $this->transformTools($chatArray['tools']);
+        }
+
+        if (isset($chatArray['tool_choice'])) {
+            $payload['tool_choice'] = $this->transformToolChoice($chatArray['tool_choice']);
         }
 
         return $payload;
+    }
+
+    private function transformTools(array $tools): array
+    {
+        $result = [];
+
+        foreach ($tools as $tool) {
+            $result[] = [
+                'type' => 'function',
+                'function' => [
+                    'name' => $tool['name'],
+                    'description' => $tool['description'] ?? '',
+                    'parameters' => $tool['parameters'] ?? [
+                        'type' => 'object',
+                        'properties' => [],
+                    ],
+                ],
+            ];
+        }
+
+        return $result;
+    }
+
+    private function transformToolChoice(string|array $toolChoice): string|array
+    {
+        if (is_array($toolChoice) && isset($toolChoice['name'])) {
+            return [
+                'type' => 'function',
+                'function' => ['name' => $toolChoice['name']],
+            ];
+        }
+
+        return $toolChoice;
     }
 
     private function makeHttpRequest(array $payload): ResponseInterface
@@ -128,29 +163,38 @@ class OpenAiDriver implements LlmDriverInterface
         $choice = $data['choices'][0];
         $message = $choice['message'] ?? [];
 
-        // Parse function calls
-        $functionCalls = [];
-        if (isset($message['function_call'])) {
-            $functionCall = $message['function_call'];
-            $name = $functionCall['name'];
-            $arguments = json_decode($functionCall['arguments'] ?? '{}', true) ?: [];
-
-            $functionCalls[$name] = new FunctionCall($name, $arguments);
+        $toolCalls = [];
+        if (isset($message['tool_calls'])) {
+            foreach ($message['tool_calls'] as $toolCall) {
+                if ($toolCall['type'] === 'function') {
+                    $name = $toolCall['function']['name'];
+                    $arguments = json_decode($toolCall['function']['arguments'] ?? '{}', true) ?: [];
+                    $toolCalls[$name] = new ToolCall($name, $arguments);
+                }
+            }
         }
 
-        // Parse usage
         $usage = new Usage(
             promptTokens: $data['usage']['prompt_tokens'] ?? 0,
             completionTokens: $data['usage']['completion_tokens'] ?? 0,
             totalTokens: $data['usage']['total_tokens'] ?? 0
         );
 
+        $stopReason = match ($choice['finish_reason'] ?? '') {
+            'stop' => 'stop',
+            'length' => 'max_tokens',
+            'tool_calls' => 'tool_calls',
+            'content_filter' => 'content_filter',
+            default => $choice['finish_reason'] ?? '',
+        };
+
         return new LlmResponse(
             content: $message['content'] ?? '',
-            functionCalls: $functionCalls,
+            toolCalls: $toolCalls,
             usage: $usage,
             model: $data['model'] ?? '',
-            rawResponse: $body
+            rawResponse: $body,
+            stopReason: $stopReason,
         );
     }
 

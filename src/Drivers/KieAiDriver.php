@@ -12,8 +12,8 @@ use Underwear\LlmWrapper\ChatBuilder\ChatBuilder;
 use Underwear\LlmWrapper\Exceptions\LlmApiException;
 use Underwear\LlmWrapper\Exceptions\LlmConfigurationException;
 use Underwear\LlmWrapper\LlmDriverInterface;
-use Underwear\LlmWrapper\LlmResponse\FunctionCall;
 use Underwear\LlmWrapper\LlmResponse\LlmResponse;
+use Underwear\LlmWrapper\LlmResponse\ToolCall;
 use Underwear\LlmWrapper\LlmResponse\Usage;
 
 class KieAiDriver implements LlmDriverInterface
@@ -75,7 +75,7 @@ class KieAiDriver implements LlmDriverInterface
         return in_array($model, self::CODEX_MODELS, true);
     }
 
-    // ── Chat completions (gpt-5-2) ──
+    // -- Chat completions (gpt-5-2) --
 
     private function buildChatPayload(ChatBuilder $chatBuilder, string $model): array
     {
@@ -90,12 +90,16 @@ class KieAiDriver implements LlmDriverInterface
             $payload['temperature'] = $chatArray['temperature'];
         }
 
-        if (isset($chatArray['functions']) && !empty($chatArray['functions'])) {
-            $payload['functions'] = $chatArray['functions'];
+        if (isset($chatArray['max_tokens'])) {
+            $payload['max_tokens'] = $chatArray['max_tokens'];
         }
 
-        if (isset($chatArray['function_call'])) {
-            $payload['function_call'] = $chatArray['function_call'];
+        if (isset($chatArray['tools']) && !empty($chatArray['tools'])) {
+            $payload['tools'] = $this->transformToolsForChat($chatArray['tools']);
+        }
+
+        if (isset($chatArray['tool_choice'])) {
+            $payload['tool_choice'] = $this->transformToolChoiceForChat($chatArray['tool_choice']);
         }
 
         if (isset($this->config['reasoning_effort'])) {
@@ -103,6 +107,39 @@ class KieAiDriver implements LlmDriverInterface
         }
 
         return $payload;
+    }
+
+    private function transformToolsForChat(array $tools): array
+    {
+        $result = [];
+
+        foreach ($tools as $tool) {
+            $result[] = [
+                'type' => 'function',
+                'function' => [
+                    'name' => $tool['name'],
+                    'description' => $tool['description'] ?? '',
+                    'parameters' => $tool['parameters'] ?? [
+                        'type' => 'object',
+                        'properties' => [],
+                    ],
+                ],
+            ];
+        }
+
+        return $result;
+    }
+
+    private function transformToolChoiceForChat(string|array $toolChoice): string|array
+    {
+        if (is_array($toolChoice) && isset($toolChoice['name'])) {
+            return [
+                'type' => 'function',
+                'function' => ['name' => $toolChoice['name']],
+            ];
+        }
+
+        return $toolChoice;
     }
 
     private function parseChatResponse(ResponseInterface $response): LlmResponse
@@ -120,12 +157,15 @@ class KieAiDriver implements LlmDriverInterface
         $choice = $data['choices'][0];
         $message = $choice['message'] ?? [];
 
-        $functionCalls = [];
-        if (isset($message['function_call'])) {
-            $fc = $message['function_call'];
-            $name = $fc['name'];
-            $arguments = json_decode($fc['arguments'] ?? '{}', true) ?: [];
-            $functionCalls[$name] = new FunctionCall($name, $arguments);
+        $toolCalls = [];
+        if (isset($message['tool_calls'])) {
+            foreach ($message['tool_calls'] as $toolCall) {
+                if (($toolCall['type'] ?? '') === 'function') {
+                    $name = $toolCall['function']['name'];
+                    $arguments = json_decode($toolCall['function']['arguments'] ?? '{}', true) ?: [];
+                    $toolCalls[$name] = new ToolCall($name, $arguments);
+                }
+            }
         }
 
         $usage = new Usage(
@@ -134,16 +174,24 @@ class KieAiDriver implements LlmDriverInterface
             totalTokens: $data['usage']['total_tokens'] ?? 0
         );
 
+        $stopReason = match ($choice['finish_reason'] ?? '') {
+            'stop' => 'stop',
+            'length' => 'max_tokens',
+            'tool_calls' => 'tool_calls',
+            default => $choice['finish_reason'] ?? '',
+        };
+
         return new LlmResponse(
             content: $message['content'] ?? '',
-            functionCalls: $functionCalls,
+            toolCalls: $toolCalls,
             usage: $usage,
             model: $data['model'] ?? '',
-            rawResponse: $body
+            rawResponse: $body,
+            stopReason: $stopReason,
         );
     }
 
-    // ── Codex responses (gpt-5-4) ──
+    // -- Codex responses (gpt-5-4) --
 
     private function buildCodexPayload(ChatBuilder $chatBuilder, string $model): array
     {
@@ -158,19 +206,19 @@ class KieAiDriver implements LlmDriverInterface
             $payload['reasoning'] = ['effort' => $this->config['reasoning_effort']];
         }
 
-        if (isset($chatArray['functions']) && !empty($chatArray['functions'])) {
-            $payload['tools'] = $this->transformFunctionsToTools($chatArray['functions']);
+        if (isset($chatArray['tools']) && !empty($chatArray['tools'])) {
+            $payload['tools'] = $this->transformToolsForCodex($chatArray['tools']);
             $payload['tool_choice'] = 'auto';
         }
 
-        if (isset($chatArray['function_call'])) {
-            $fc = $chatArray['function_call'];
-            if (is_array($fc) && isset($fc['name'])) {
+        if (isset($chatArray['tool_choice'])) {
+            $tc = $chatArray['tool_choice'];
+            if (is_array($tc) && isset($tc['name'])) {
                 $payload['tool_choice'] = [
                     'type' => 'function',
-                    'name' => $fc['name'],
+                    'name' => $tc['name'],
                 ];
-            } elseif ($fc === 'none') {
+            } elseif ($tc === 'none') {
                 $payload['tool_choice'] = 'none';
             } else {
                 $payload['tool_choice'] = 'auto';
@@ -180,30 +228,29 @@ class KieAiDriver implements LlmDriverInterface
         return $payload;
     }
 
-    private function transformFunctionsToTools(array $functions): array
+    private function transformToolsForCodex(array $tools): array
     {
-        $tools = [];
+        $result = [];
 
-        foreach ($functions as $function) {
-            $tools[] = [
+        foreach ($tools as $tool) {
+            $result[] = [
                 'type' => 'function',
-                'name' => $function['name'],
-                'description' => $function['description'] ?? '',
-                'parameters' => $function['parameters'] ?? [
+                'name' => $tool['name'],
+                'description' => $tool['description'] ?? '',
+                'parameters' => $tool['parameters'] ?? [
                     'type' => 'object',
                     'properties' => [],
                 ],
             ];
         }
 
-        return $tools;
+        return $result;
     }
 
     private function parseCodexResponse(ResponseInterface $httpResponse): LlmResponse
     {
         $body = $httpResponse->getBody()->getContents();
 
-        // Codex endpoint always returns SSE stream — extract the final response.completed event
         $response = $this->extractCompletedResponse($body);
 
         $this->checkApiError($response);
@@ -213,7 +260,7 @@ class KieAiDriver implements LlmDriverInterface
         }
 
         $content = '';
-        $functionCalls = [];
+        $toolCalls = [];
 
         foreach ($response['output'] as $block) {
             if ($block['type'] === 'message' && isset($block['content'])) {
@@ -227,22 +274,28 @@ class KieAiDriver implements LlmDriverInterface
             if ($block['type'] === 'function_call') {
                 $name = $block['name'] ?? '';
                 $arguments = json_decode($block['arguments'] ?? '{}', true) ?: [];
-                $functionCalls[$name] = new FunctionCall($name, $arguments);
+                $toolCalls[$name] = new ToolCall($name, $arguments);
             }
         }
 
         $usage = $response['usage'] ?? [];
 
+        $stopReason = match ($response['status'] ?? '') {
+            'completed' => 'stop',
+            default => $response['status'] ?? '',
+        };
+
         return new LlmResponse(
             content: $content,
-            functionCalls: $functionCalls,
+            toolCalls: $toolCalls,
             usage: new Usage(
                 promptTokens: $usage['input_tokens'] ?? 0,
                 completionTokens: $usage['output_tokens'] ?? 0,
                 totalTokens: $usage['total_tokens'] ?? 0
             ),
             model: $response['model'] ?? '',
-            rawResponse: $body
+            rawResponse: $body,
+            stopReason: $stopReason,
         );
     }
 
@@ -273,7 +326,7 @@ class KieAiDriver implements LlmDriverInterface
         return $event['response'];
     }
 
-    // ── Shared ──
+    // -- Shared --
 
     private function makeHttpRequest(string $endpoint, array $payload): ResponseInterface
     {

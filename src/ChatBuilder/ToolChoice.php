@@ -1,11 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Underwear\LlmWrapper\ChatBuilder;
 
-class FunctionCallMode
+class ToolChoice
 {
     const AUTO = 'auto';
     const NONE = 'none';
+    const REQUIRED = 'required';
 
     public static function auto(): string
     {
@@ -17,8 +20,13 @@ class FunctionCallMode
         return self::NONE;
     }
 
-    public static function specific(string $functionName): array
+    public static function required(): string
     {
-        return ['name' => $functionName];
+        return self::REQUIRED;
+    }
+
+    public static function specific(string $toolName): array
+    {
+        return ['name' => $toolName];
     }
 }

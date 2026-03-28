@@ -5,15 +5,15 @@ declare(strict_types=1);
 namespace Underwear\LlmWrapper\Tests\ChatBuilder;
 
 use PHPUnit\Framework\TestCase;
-use Underwear\LlmWrapper\ChatBuilder\FunctionBuilder;
+use Underwear\LlmWrapper\ChatBuilder\ToolBuilder;
 use Underwear\LlmWrapper\ChatBuilder\FunctionParam;
 use InvalidArgumentException;
 
-class FunctionBuilderTest extends TestCase
+class ToolBuilderTest extends TestCase
 {
     public function testConstructorWithValidName(): void
     {
-        $builder = new FunctionBuilder('test_function');
+        $builder = new ToolBuilder('test_function');
 
         $this->assertEquals('test_function', $builder->getName());
         $this->assertNull($builder->getDescription());
@@ -22,47 +22,47 @@ class FunctionBuilderTest extends TestCase
 
     public function testStaticCreateMethod(): void
     {
-        $builder = FunctionBuilder::create('search_users');
+        $builder = ToolBuilder::create('search_users');
 
-        $this->assertInstanceOf(FunctionBuilder::class, $builder);
+        $this->assertInstanceOf(ToolBuilder::class, $builder);
         $this->assertEquals('search_users', $builder->getName());
     }
 
     /**
-     * @dataProvider invalidFunctionNamesProvider
+     * @dataProvider invalidToolNamesProvider
      */
     public function testConstructorWithInvalidName(string $invalidName, string $expectedMessage): void
     {
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage($expectedMessage);
 
-        new FunctionBuilder($invalidName);
+        new ToolBuilder($invalidName);
     }
 
-    public function invalidFunctionNamesProvider(): array
+    public function invalidToolNamesProvider(): array
     {
         return [
-            'empty name' => ['', 'Function name cannot be empty'],
-            'starts with number' => ['123invalid', 'Function name must be a valid identifier'],
-            'contains spaces' => ['invalid name', 'Function name must be a valid identifier'],
-            'contains special chars' => ['invalid-name', 'Function name must be a valid identifier'],
-            'too long' => [str_repeat('a', 65), 'Function name cannot exceed 64 characters'],
+            'empty name' => ['', 'Tool name cannot be empty'],
+            'starts with number' => ['123invalid', 'Tool name must be a valid identifier'],
+            'contains spaces' => ['invalid name', 'Tool name must be a valid identifier'],
+            'contains special chars' => ['invalid-name', 'Tool name must be a valid identifier'],
+            'too long' => [str_repeat('a', 65), 'Tool name cannot exceed 64 characters'],
         ];
     }
 
-    public function testValidFunctionNames(): void
+    public function testValidToolNames(): void
     {
         $validNames = ['validName', 'valid_name', '_validName', 'validName123', 'a'];
 
         foreach ($validNames as $name) {
-            $builder = new FunctionBuilder($name);
+            $builder = new ToolBuilder($name);
             $this->assertEquals($name, $builder->getName());
         }
     }
 
     public function testDescriptionMethod(): void
     {
-        $builder = FunctionBuilder::create('test')
+        $builder = ToolBuilder::create('test')
             ->description('Test function description');
 
         $this->assertEquals('Test function description', $builder->getDescription());
@@ -70,10 +70,10 @@ class FunctionBuilderTest extends TestCase
 
     public function testFluentApiChaining(): void
     {
-        $builder = FunctionBuilder::create('test')
+        $builder = ToolBuilder::create('test')
             ->description('Test description');
 
-        $this->assertInstanceOf(FunctionBuilder::class, $builder);
+        $this->assertInstanceOf(ToolBuilder::class, $builder);
         $this->assertEquals('test', $builder->getName());
         $this->assertEquals('Test description', $builder->getDescription());
     }
@@ -81,7 +81,7 @@ class FunctionBuilderTest extends TestCase
     public function testParamMethod(): void
     {
         $param = FunctionParam::string('username');
-        $builder = FunctionBuilder::create('test')->param($param);
+        $builder = ToolBuilder::create('test')->param($param);
 
         $parameters = $builder->getParameters();
         $this->assertCount(1, $parameters);
@@ -93,7 +93,7 @@ class FunctionBuilderTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("Parameter 'username' already exists");
 
-        FunctionBuilder::create('test')
+        ToolBuilder::create('test')
             ->param(FunctionParam::string('username'))
             ->param(FunctionParam::string('username'));
     }
@@ -103,7 +103,7 @@ class FunctionBuilderTest extends TestCase
         $param1 = FunctionParam::string('param1');
         $param2 = FunctionParam::int('param2');
 
-        $builder = FunctionBuilder::create('test')->params([$param1, $param2]);
+        $builder = ToolBuilder::create('test')->params([$param1, $param2]);
 
         $this->assertCount(2, $builder->getParameters());
     }
@@ -113,12 +113,12 @@ class FunctionBuilderTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('All items in params array must be FunctionParam instances');
 
-        FunctionBuilder::create('test')->params(['not_a_param']);
+        ToolBuilder::create('test')->params(['not_a_param']);
     }
 
     public function testStringParamShortcut(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $param = $builder->stringParam('username');
 
         $this->assertInstanceOf(FunctionParam::class, $param);
@@ -129,7 +129,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testIntParamShortcut(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $param = $builder->intParam('age');
 
         $this->assertInstanceOf(FunctionParam::class, $param);
@@ -139,7 +139,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testFloatParamShortcut(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $param = $builder->floatParam('price');
 
         $this->assertEquals('number', $param->getType());
@@ -147,7 +147,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testBoolParamShortcut(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $param = $builder->boolParam('active');
 
         $this->assertEquals('boolean', $param->getType());
@@ -155,7 +155,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testObjectParamShortcut(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $param = $builder->objectParam('config');
 
         $this->assertEquals('object', $param->getType());
@@ -163,7 +163,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testArrayParamShortcut(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $param = $builder->arrayParam('items');
 
         $this->assertEquals('array', $param->getType());
@@ -171,7 +171,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testParameterShortcutsChaining(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('name')->required()->description('User name');
         $builder->intParam('age')->min(0)->max(120);
 
@@ -182,7 +182,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testHasParam(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('username');
 
         $this->assertTrue($builder->hasParam('username'));
@@ -191,7 +191,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testGetParam(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('username');
 
         $param = $builder->getParam('username');
@@ -203,7 +203,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testRemoveParam(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('username');
         $builder->intParam('age');
 
@@ -218,7 +218,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testGetRequiredParams(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('required')->required();
         $builder->stringParam('optional');
         $builder->intParam('another_required')->required();
@@ -232,7 +232,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testGetOptionalParams(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('required')->required();
         $builder->stringParam('optional');
         $builder->intParam('another_optional');
@@ -244,18 +244,18 @@ class FunctionBuilderTest extends TestCase
         $this->assertArrayHasKey('another_optional', $optionalParams);
     }
 
-    public function testValidateEmptyFunction(): void
+    public function testValidateEmptyTool(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $errors = $builder->validate();
 
-        $this->assertContains('Function must have at least one parameter', $errors);
+        $this->assertContains('Tool must have at least one parameter', $errors);
         $this->assertFalse($builder->isValid());
     }
 
-    public function testValidateValidFunction(): void
+    public function testValidateValidTool(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('param');
 
         $errors = $builder->validate();
@@ -266,7 +266,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testToSchemaBasic(): void
     {
-        $builder = FunctionBuilder::create('search_users')
+        $builder = ToolBuilder::create('search_users')
             ->description('Search for users');
         $builder->stringParam('query')->required();
         $builder->intParam('limit')->min(1)->max(100);
@@ -279,7 +279,6 @@ class FunctionBuilderTest extends TestCase
         $this->assertArrayHasKey('properties', $schema['parameters']);
         $this->assertEquals(['query'], $schema['parameters']['required']);
 
-        // Проверяем свойства параметров
         $this->assertArrayHasKey('query', $schema['parameters']['properties']);
         $this->assertArrayHasKey('limit', $schema['parameters']['properties']);
         $this->assertEquals('string', $schema['parameters']['properties']['query']['type']);
@@ -288,8 +287,8 @@ class FunctionBuilderTest extends TestCase
 
     public function testToSchemaWithoutDescription(): void
     {
-        $builder = FunctionBuilder::create('test')
-            ->stringParam('param');
+        $builder = ToolBuilder::create('test');
+        $builder->stringParam('param');
 
         $schema = $builder->toSchema();
 
@@ -298,7 +297,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testToSchemaWithoutRequiredParams(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('optional1');
         $builder->stringParam('optional2');
 
@@ -309,7 +308,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testToArrayMethod(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('param');
 
         $this->assertEquals($builder->toSchema(), $builder->toArray());
@@ -317,7 +316,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testToJsonMethod(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('param');
 
         $json = $builder->toJson();
@@ -329,7 +328,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testCloneWithName(): void
     {
-        $original = FunctionBuilder::create('original')
+        $original = ToolBuilder::create('original')
             ->description('Original function');
         $original->stringParam('param1')->required();
         $original->intParam('param2');
@@ -342,13 +341,12 @@ class FunctionBuilderTest extends TestCase
         $this->assertTrue($clone->hasParam('param1'));
         $this->assertTrue($clone->hasParam('param2'));
 
-        // Убеждаемся, что это отдельные объекты
         $this->assertNotSame($original, $clone);
     }
 
     public function testGetParametersAssoc(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('param1');
         $builder->intParam('param2');
 
@@ -362,7 +360,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testGetParameterCount(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
 
         $this->assertEquals(0, $builder->getParameterCount());
 
@@ -375,7 +373,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testGetParameterNames(): void
     {
-        $builder = FunctionBuilder::create('test');
+        $builder = ToolBuilder::create('test');
         $builder->stringParam('username');
         $builder->intParam('age');
         $builder->boolParam('active');
@@ -387,7 +385,7 @@ class FunctionBuilderTest extends TestCase
 
     public function testToStringMethod(): void
     {
-        $builder = FunctionBuilder::create('test_function');
+        $builder = ToolBuilder::create('test_function');
         $builder->stringParam('param1')->required();
         $builder->stringParam('param2');
         $builder->intParam('param3')->required();
@@ -399,9 +397,9 @@ class FunctionBuilderTest extends TestCase
         $this->assertStringContainsString('required: 2', $string);
     }
 
-    public function testComplexFunctionWithNestedObjects(): void
+    public function testComplexToolWithNestedObjects(): void
     {
-        $builder = FunctionBuilder::create('create_user')
+        $builder = ToolBuilder::create('create_user')
             ->description('Creates a new user account');
 
         $builder->objectParam('user_data')
@@ -424,24 +422,20 @@ class FunctionBuilderTest extends TestCase
 
         $schema = $builder->toSchema();
 
-        // Проверяем основную структуру
         $this->assertEquals('create_user', $schema['name']);
         $this->assertEquals('Creates a new user account', $schema['description']);
         $this->assertEquals(['user_data'], $schema['parameters']['required']);
 
-        // Проверяем объект user_data
         $userData = $schema['parameters']['properties']['user_data'];
         $this->assertEquals('object', $userData['type']);
         $this->assertEquals('User information', $userData['description']);
         $this->assertEquals(['email', 'name'], $userData['required']);
 
-        // Проверяем вложенный объект preferences
         $preferences = $userData['properties']['preferences'];
         $this->assertEquals('object', $preferences['type']);
         $this->assertArrayHasKey('theme', $preferences['properties']);
         $this->assertEquals(['light', 'dark'], $preferences['properties']['theme']['enum']);
 
-        // Проверяем массив ролей
         $roles = $schema['parameters']['properties']['roles'];
         $this->assertEquals('array', $roles['type']);
         $this->assertEquals('User roles', $roles['description']);
@@ -449,11 +443,11 @@ class FunctionBuilderTest extends TestCase
     }
 
     /**
-     * @dataProvider functionBuilderScenariosProvider
+     * @dataProvider toolBuilderScenariosProvider
      */
     public function testVariousScenarios(string $name, callable $builderSetup, array $expectedChecks): void
     {
-        $builder = FunctionBuilder::create($name);
+        $builder = ToolBuilder::create($name);
         $builderSetup($builder);
 
         foreach ($expectedChecks as $check => $expected) {
@@ -476,10 +470,10 @@ class FunctionBuilderTest extends TestCase
         }
     }
 
-    public function functionBuilderScenariosProvider(): array
+    public function toolBuilderScenariosProvider(): array
     {
         return [
-            'simple function' => [
+            'simple tool' => [
                 'simple',
                 function($b) {
                     $b->stringParam('query')->required();
@@ -491,7 +485,7 @@ class FunctionBuilderTest extends TestCase
                     'hasParam' => ['query' => true, 'nonexistent' => false]
                 ]
             ],
-            'complex function' => [
+            'complex tool' => [
                 'complex',
                 function($b) {
                     $b->stringParam('param1')->required();

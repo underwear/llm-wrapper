@@ -7,7 +7,7 @@ namespace Underwear\LlmWrapper\Tests\ChatBuilder;
 use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\MockObject\MockObject;
 use Underwear\LlmWrapper\ChatBuilder\ChatBuilder;
-use Underwear\LlmWrapper\ChatBuilder\FunctionBuilder;
+use Underwear\LlmWrapper\ChatBuilder\ToolBuilder;
 use Underwear\LlmWrapper\LlmClient;
 use Underwear\LlmWrapper\LlmResponse\LlmResponse;
 
@@ -30,15 +30,16 @@ class ChatBuilderTest extends TestCase
         $this->assertEmpty($chatBuilder->getMessages());
         $this->assertNull($chatBuilder->getModel());
         $this->assertNull($chatBuilder->getTemperature());
-        $this->assertEmpty($chatBuilder->getFunctions());
-        $this->assertNull($chatBuilder->getFunctionCallMode());
+        $this->assertNull($chatBuilder->getMaxTokens());
+        $this->assertEmpty($chatBuilder->getTools());
+        $this->assertNull($chatBuilder->getToolChoice());
     }
 
     public function testModelMethod(): void
     {
         $result = $this->chatBuilder->model('gpt-4');
 
-        $this->assertSame($this->chatBuilder, $result); // fluent interface
+        $this->assertSame($this->chatBuilder, $result);
         $this->assertEquals('gpt-4', $this->chatBuilder->getModel());
     }
 
@@ -46,8 +47,16 @@ class ChatBuilderTest extends TestCase
     {
         $result = $this->chatBuilder->temperature(0.7);
 
-        $this->assertSame($this->chatBuilder, $result); // fluent interface
+        $this->assertSame($this->chatBuilder, $result);
         $this->assertEquals(0.7, $this->chatBuilder->getTemperature());
+    }
+
+    public function testMaxTokensMethod(): void
+    {
+        $result = $this->chatBuilder->maxTokens(1000);
+
+        $this->assertSame($this->chatBuilder, $result);
+        $this->assertEquals(1000, $this->chatBuilder->getMaxTokens());
     }
 
     public function testSystemMessage(): void
@@ -55,7 +64,7 @@ class ChatBuilderTest extends TestCase
         $content = 'You are a helpful assistant.';
         $result = $this->chatBuilder->system($content);
 
-        $this->assertSame($this->chatBuilder, $result); // fluent interface
+        $this->assertSame($this->chatBuilder, $result);
 
         $messages = $this->chatBuilder->getMessages();
         $this->assertCount(1, $messages);
@@ -70,7 +79,7 @@ class ChatBuilderTest extends TestCase
         $content = 'Hello, how are you?';
         $result = $this->chatBuilder->user($content);
 
-        $this->assertSame($this->chatBuilder, $result); // fluent interface
+        $this->assertSame($this->chatBuilder, $result);
 
         $messages = $this->chatBuilder->getMessages();
         $this->assertCount(1, $messages);
@@ -85,7 +94,7 @@ class ChatBuilderTest extends TestCase
         $content = 'I am doing well, thank you!';
         $result = $this->chatBuilder->assistant($content);
 
-        $this->assertSame($this->chatBuilder, $result); // fluent interface
+        $this->assertSame($this->chatBuilder, $result);
 
         $messages = $this->chatBuilder->getMessages();
         $this->assertCount(1, $messages);
@@ -110,29 +119,28 @@ class ChatBuilderTest extends TestCase
         $this->assertEquals('assistant', $messages[2]['role']);
     }
 
-    public function testFunctionMethod(): void
+    public function testToolWithCallback(): void
     {
-        $result = $this->chatBuilder->function('get_weather', function (FunctionBuilder $builder) {
+        $result = $this->chatBuilder->tool('get_weather', function (ToolBuilder $builder) {
             $builder->description('Get current weather for a location');
             $builder->stringParam('location')->required()->description('The city name');
             $builder->stringParam('units')->enum(['celsius', 'fahrenheit']);
         });
 
-        $this->assertSame($this->chatBuilder, $result); // fluent interface
+        $this->assertSame($this->chatBuilder, $result);
 
-        $functions = $this->chatBuilder->getFunctions();
-        $this->assertCount(1, $functions);
+        $tools = $this->chatBuilder->getTools();
+        $this->assertCount(1, $tools);
 
-        $function = $functions[0];
-        $this->assertEquals('get_weather', $function['name']);
-        $this->assertEquals('Get current weather for a location', $function['description']);
-        $this->assertArrayHasKey('parameters', $function);
-        $this->assertEquals('object', $function['parameters']['type']);
-        $this->assertArrayHasKey('properties', $function['parameters']);
-        $this->assertEquals(['location'], $function['parameters']['required']);
+        $tool = $tools[0];
+        $this->assertEquals('get_weather', $tool['name']);
+        $this->assertEquals('Get current weather for a location', $tool['description']);
+        $this->assertArrayHasKey('parameters', $tool);
+        $this->assertEquals('object', $tool['parameters']['type']);
+        $this->assertArrayHasKey('properties', $tool['parameters']);
+        $this->assertEquals(['location'], $tool['parameters']['required']);
 
-        // Check parameter properties
-        $properties = $function['parameters']['properties'];
+        $properties = $tool['parameters']['properties'];
         $this->assertArrayHasKey('location', $properties);
         $this->assertArrayHasKey('units', $properties);
         $this->assertEquals('string', $properties['location']['type']);
@@ -140,30 +148,46 @@ class ChatBuilderTest extends TestCase
         $this->assertEquals(['celsius', 'fahrenheit'], $properties['units']['enum']);
     }
 
-    public function testMultipleFunctions(): void
+    public function testToolWithToolBuilderObject(): void
+    {
+        $weatherTool = ToolBuilder::create('get_weather')
+            ->description('Get weather');
+        $weatherTool->stringParam('city')->required();
+
+        $result = $this->chatBuilder->tool($weatherTool);
+
+        $this->assertSame($this->chatBuilder, $result);
+
+        $tools = $this->chatBuilder->getTools();
+        $this->assertCount(1, $tools);
+        $this->assertEquals('get_weather', $tools[0]['name']);
+        $this->assertEquals('Get weather', $tools[0]['description']);
+    }
+
+    public function testMultipleTools(): void
     {
         $this->chatBuilder
-            ->function('get_weather', function (FunctionBuilder $builder) {
+            ->tool('get_weather', function (ToolBuilder $builder) {
                 $builder->stringParam('location')->required();
             })
-            ->function('send_email', function (FunctionBuilder $builder) {
+            ->tool('send_email', function (ToolBuilder $builder) {
                 $builder->stringParam('to')->required();
                 $builder->stringParam('subject')->required();
                 $builder->stringParam('body')->required();
             });
 
-        $functions = $this->chatBuilder->getFunctions();
-        $this->assertCount(2, $functions);
-        $this->assertEquals('get_weather', $functions[0]['name']);
-        $this->assertEquals('send_email', $functions[1]['name']);
+        $tools = $this->chatBuilder->getTools();
+        $this->assertCount(2, $tools);
+        $this->assertEquals('get_weather', $tools[0]['name']);
+        $this->assertEquals('send_email', $tools[1]['name']);
     }
 
-    public function testFunctionCallMethod(): void
+    public function testToolChoiceMethod(): void
     {
-        $result = $this->chatBuilder->functionCall('auto');
+        $result = $this->chatBuilder->toolChoice('auto');
 
-        $this->assertSame($this->chatBuilder, $result); // fluent interface
-        $this->assertEquals('auto', $this->chatBuilder->getFunctionCallMode());
+        $this->assertSame($this->chatBuilder, $result);
+        $this->assertEquals('auto', $this->chatBuilder->getToolChoice());
     }
 
     public function testToArrayMinimal(): void
@@ -197,33 +221,46 @@ class ChatBuilderTest extends TestCase
         $this->assertEquals(0.8, $array['temperature']);
     }
 
-    public function testToArrayWithFunctions(): void
+    public function testToArrayWithMaxTokens(): void
+    {
+        $this->chatBuilder
+            ->model('gpt-4')
+            ->maxTokens(500)
+            ->user('Hello');
+
+        $array = $this->chatBuilder->toArray();
+
+        $this->assertArrayHasKey('max_tokens', $array);
+        $this->assertEquals(500, $array['max_tokens']);
+    }
+
+    public function testToArrayWithTools(): void
     {
         $this->chatBuilder
             ->model('gpt-4')
             ->user('What\'s the weather?')
-            ->function('get_weather', function (FunctionBuilder $builder) {
+            ->tool('get_weather', function (ToolBuilder $builder) {
                 $builder->stringParam('location')->required();
             });
 
         $array = $this->chatBuilder->toArray();
 
-        $this->assertArrayHasKey('functions', $array);
-        $this->assertCount(1, $array['functions']);
-        $this->assertEquals('get_weather', $array['functions'][0]['name']);
+        $this->assertArrayHasKey('tools', $array);
+        $this->assertCount(1, $array['tools']);
+        $this->assertEquals('get_weather', $array['tools'][0]['name']);
     }
 
-    public function testToArrayWithFunctionCallMode(): void
+    public function testToArrayWithToolChoice(): void
     {
         $this->chatBuilder
             ->model('gpt-4')
             ->user('Hello')
-            ->functionCall('none');
+            ->toolChoice('none');
 
         $array = $this->chatBuilder->toArray();
 
-        $this->assertArrayHasKey('function_call', $array);
-        $this->assertEquals('none', $array['function_call']);
+        $this->assertArrayHasKey('tool_choice', $array);
+        $this->assertEquals('none', $array['tool_choice']);
     }
 
     public function testToArrayComplete(): void
@@ -231,22 +268,24 @@ class ChatBuilderTest extends TestCase
         $this->chatBuilder
             ->model('gpt-4')
             ->temperature(0.5)
+            ->maxTokens(2000)
             ->system('You are a weather assistant.')
             ->user('What is the weather in Paris?')
-            ->function('get_weather', function (FunctionBuilder $builder) {
+            ->tool('get_weather', function (ToolBuilder $builder) {
                 $builder->description('Get weather information');
                 $builder->stringParam('city')->required();
                 $builder->stringParam('country');
             })
-            ->functionCall('auto');
+            ->toolChoice('auto');
 
         $array = $this->chatBuilder->toArray();
 
         $this->assertEquals('gpt-4', $array['model']);
         $this->assertEquals(0.5, $array['temperature']);
+        $this->assertEquals(2000, $array['max_tokens']);
         $this->assertCount(2, $array['messages']);
-        $this->assertCount(1, $array['functions']);
-        $this->assertEquals('auto', $array['function_call']);
+        $this->assertCount(1, $array['tools']);
+        $this->assertEquals('auto', $array['tool_choice']);
     }
 
     public function testToArrayWithoutOptionalFields(): void
@@ -258,8 +297,9 @@ class ChatBuilderTest extends TestCase
         $array = $this->chatBuilder->toArray();
 
         $this->assertArrayNotHasKey('temperature', $array);
-        $this->assertArrayNotHasKey('functions', $array);
-        $this->assertArrayNotHasKey('function_call', $array);
+        $this->assertArrayNotHasKey('max_tokens', $array);
+        $this->assertArrayNotHasKey('tools', $array);
+        $this->assertArrayNotHasKey('tool_choice', $array);
     }
 
     public function testSendMethod(): void
@@ -282,22 +322,23 @@ class ChatBuilderTest extends TestCase
         $result = $this->chatBuilder
             ->model('gpt-4')
             ->temperature(0.7)
+            ->maxTokens(1000)
             ->system('You are helpful.')
             ->user('Hello')
             ->assistant('Hi there!')
-            ->function('test_func', function (FunctionBuilder $builder) {
+            ->tool('test_func', function (ToolBuilder $builder) {
                 $builder->stringParam('param');
             })
-            ->functionCall('auto');
+            ->toolChoice('auto');
 
         $this->assertSame($this->chatBuilder, $result);
 
-        // Verify all data was set correctly
         $this->assertEquals('gpt-4', $this->chatBuilder->getModel());
         $this->assertEquals(0.7, $this->chatBuilder->getTemperature());
+        $this->assertEquals(1000, $this->chatBuilder->getMaxTokens());
         $this->assertCount(3, $this->chatBuilder->getMessages());
-        $this->assertCount(1, $this->chatBuilder->getFunctions());
-        $this->assertEquals('auto', $this->chatBuilder->getFunctionCallMode());
+        $this->assertCount(1, $this->chatBuilder->getTools());
+        $this->assertEquals('auto', $this->chatBuilder->getToolChoice());
     }
 
     public function testGetters(): void
@@ -305,12 +346,14 @@ class ChatBuilderTest extends TestCase
         $this->chatBuilder
             ->model('gpt-4')
             ->temperature(0.9)
+            ->maxTokens(500)
             ->system('System message')
-            ->functionCall('none');
+            ->toolChoice('none');
 
         $this->assertEquals('gpt-4', $this->chatBuilder->getModel());
         $this->assertEquals(0.9, $this->chatBuilder->getTemperature());
-        $this->assertEquals('none', $this->chatBuilder->getFunctionCallMode());
+        $this->assertEquals(500, $this->chatBuilder->getMaxTokens());
+        $this->assertEquals('none', $this->chatBuilder->getToolChoice());
 
         $messages = $this->chatBuilder->getMessages();
         $this->assertCount(1, $messages);
@@ -318,15 +361,15 @@ class ChatBuilderTest extends TestCase
         $this->assertEquals('System message', $messages[0]['content']);
     }
 
-    public function testEmptyFunctionsArray(): void
+    public function testEmptyToolsArray(): void
     {
         $this->chatBuilder->model('gpt-3.5-turbo')->user('Hello');
 
-        $functions = $this->chatBuilder->getFunctions();
-        $this->assertEmpty($functions);
+        $tools = $this->chatBuilder->getTools();
+        $this->assertEmpty($tools);
 
         $array = $this->chatBuilder->toArray();
-        $this->assertArrayNotHasKey('functions', $array);
+        $this->assertArrayNotHasKey('tools', $array);
     }
 
     /**
@@ -360,28 +403,28 @@ class ChatBuilderTest extends TestCase
     }
 
     /**
-     * @dataProvider functionCallModesProvider
+     * @dataProvider toolChoiceModesProvider
      */
-    public function testFunctionCallModes(string $mode): void
+    public function testToolChoiceModes(string $mode): void
     {
-        $this->chatBuilder->functionCall($mode);
+        $this->chatBuilder->toolChoice($mode);
 
-        $this->assertEquals($mode, $this->chatBuilder->getFunctionCallMode());
+        $this->assertEquals($mode, $this->chatBuilder->getToolChoice());
 
         $array = $this->chatBuilder
             ->model('gpt-4')
             ->user('Test')
             ->toArray();
 
-        $this->assertEquals($mode, $array['function_call']);
+        $this->assertEquals($mode, $array['tool_choice']);
     }
 
-    public function functionCallModesProvider(): array
+    public function toolChoiceModesProvider(): array
     {
         return [
             'auto mode' => ['auto'],
             'none mode' => ['none'],
-            'specific function' => ['{"name": "get_weather"}'],
+            'required mode' => ['required'],
         ];
     }
 
@@ -394,44 +437,41 @@ class ChatBuilderTest extends TestCase
             ->user('What\'s the weather in London?')
             ->assistant('I\'ll check the weather in London for you.')
             ->user('Great! Also send an email to john@example.com about the weather.')
-            ->function('get_weather', function (FunctionBuilder $builder) {
+            ->tool('get_weather', function (ToolBuilder $builder) {
                 $builder->description('Get current weather for a city');
                 $builder->stringParam('city')->required()->description('City name');
                 $builder->stringParam('country')->description('Country code');
                 $builder->stringParam('units')->enum(['metric', 'imperial'])->description('Temperature units');
             })
-            ->function('send_email', function (FunctionBuilder $builder) {
+            ->tool('send_email', function (ToolBuilder $builder) {
                 $builder->description('Send an email to a recipient');
                 $builder->stringParam('to')->required()->description('Recipient email address');
                 $builder->stringParam('subject')->required()->description('Email subject');
                 $builder->stringParam('body')->required()->description('Email body content');
                 $builder->boolParam('urgent')->description('Mark email as urgent');
             })
-            ->functionCall('auto');
+            ->toolChoice('auto');
 
         $array = $this->chatBuilder->toArray();
 
-        // Verify structure
         $this->assertEquals('gpt-4', $array['model']);
         $this->assertEquals(0.7, $array['temperature']);
-        $this->assertEquals('auto', $array['function_call']);
+        $this->assertEquals('auto', $array['tool_choice']);
         $this->assertCount(4, $array['messages']);
-        $this->assertCount(2, $array['functions']);
+        $this->assertCount(2, $array['tools']);
 
-        // Verify message sequence
         $this->assertEquals('system', $array['messages'][0]['role']);
         $this->assertEquals('user', $array['messages'][1]['role']);
         $this->assertEquals('assistant', $array['messages'][2]['role']);
         $this->assertEquals('user', $array['messages'][3]['role']);
 
-        // Verify functions
-        $weatherFunction = $array['functions'][0];
-        $emailFunction = $array['functions'][1];
+        $weatherTool = $array['tools'][0];
+        $emailTool = $array['tools'][1];
 
-        $this->assertEquals('get_weather', $weatherFunction['name']);
-        $this->assertEquals('send_email', $emailFunction['name']);
-        $this->assertEquals(['city'], $weatherFunction['parameters']['required']);
-        $this->assertEquals(['to', 'subject', 'body'], $emailFunction['parameters']['required']);
+        $this->assertEquals('get_weather', $weatherTool['name']);
+        $this->assertEquals('send_email', $emailTool['name']);
+        $this->assertEquals(['city'], $weatherTool['parameters']['required']);
+        $this->assertEquals(['to', 'subject', 'body'], $emailTool['parameters']['required']);
     }
 
     public function testMessageOrderMaintained(): void
@@ -467,22 +507,24 @@ class ChatBuilderTest extends TestCase
         $this->chatBuilder
             ->model('gpt-3.5-turbo')
             ->temperature(0.5)
-            ->functionCall('none');
+            ->maxTokens(100)
+            ->toolChoice('none');
 
-        // Overwrite values
         $this->chatBuilder
             ->model('gpt-4')
             ->temperature(0.8)
-            ->functionCall('auto');
+            ->maxTokens(2000)
+            ->toolChoice('auto');
 
-        // Verify latest values are used
         $this->assertEquals('gpt-4', $this->chatBuilder->getModel());
         $this->assertEquals(0.8, $this->chatBuilder->getTemperature());
-        $this->assertEquals('auto', $this->chatBuilder->getFunctionCallMode());
+        $this->assertEquals(2000, $this->chatBuilder->getMaxTokens());
+        $this->assertEquals('auto', $this->chatBuilder->getToolChoice());
 
         $array = $this->chatBuilder->user('Test')->toArray();
         $this->assertEquals('gpt-4', $array['model']);
         $this->assertEquals(0.8, $array['temperature']);
-        $this->assertEquals('auto', $array['function_call']);
+        $this->assertEquals(2000, $array['max_tokens']);
+        $this->assertEquals('auto', $array['tool_choice']);
     }
 }
