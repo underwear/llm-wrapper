@@ -62,7 +62,7 @@ class AnthropicDriver implements LlmDriverInterface
 
         $model = $chatArray['model'] ?? $this->defaultModel ?? self::DEFAULT_MODEL;
 
-        $messages = $this->filterNonSystemMessages($chatArray['messages']);
+        $messages = $this->transformMessages($chatArray['messages']);
         $systemMessage = $this->extractSystemMessage($chatArray['messages']);
 
         $maxTokens = $chatArray['max_tokens'] ?? $this->config['max_tokens'] ?? self::MAX_TOKENS_DEFAULT;
@@ -95,22 +95,60 @@ class AnthropicDriver implements LlmDriverInterface
         return $payload;
     }
 
-    private function filterNonSystemMessages(array $messages): array
+    private function transformMessages(array $messages): array
     {
-        $filtered = [];
+        $result = [];
+        $pendingToolResults = [];
 
         foreach ($messages as $message) {
             if ($message['role'] === 'system') {
                 continue;
             }
 
-            $filtered[] = [
+            if (isset($message['_tool_calls'])) {
+                $content = [];
+                if (!empty($message['content'])) {
+                    $content[] = ['type' => 'text', 'text' => $message['content']];
+                }
+                foreach ($message['_tool_calls'] as $call) {
+                    $content[] = [
+                        'type' => 'tool_use',
+                        'id' => $call['id'],
+                        'name' => $call['name'],
+                        'input' => $call['arguments'],
+                    ];
+                }
+                $result[] = ['role' => 'assistant', 'content' => $content];
+                continue;
+            }
+
+            if ($message['role'] === 'tool_result') {
+                $pendingToolResults[] = [
+                    'type' => 'tool_result',
+                    'tool_use_id' => $message['tool_call_id'],
+                    'content' => $message['content'],
+                ];
+                continue;
+            }
+
+            // Flush pending tool results as a user message before any non-tool message
+            if (!empty($pendingToolResults)) {
+                $result[] = ['role' => 'user', 'content' => $pendingToolResults];
+                $pendingToolResults = [];
+            }
+
+            $result[] = [
                 'role' => $message['role'],
                 'content' => $message['content'],
             ];
         }
 
-        return $filtered;
+        // Flush remaining tool results
+        if (!empty($pendingToolResults)) {
+            $result[] = ['role' => 'user', 'content' => $pendingToolResults];
+        }
+
+        return $result;
     }
 
     private function extractSystemMessage(array $messages): ?string
@@ -209,9 +247,11 @@ class AnthropicDriver implements LlmDriverInterface
             if ($contentBlock['type'] === 'text') {
                 $content .= $contentBlock['text'];
             } elseif ($contentBlock['type'] === 'tool_use') {
-                $name = $contentBlock['name'];
-                $arguments = $contentBlock['input'] ?? [];
-                $toolCalls[$name] = new ToolCall($name, $arguments);
+                $toolCalls[] = new ToolCall(
+                    id: $contentBlock['id'],
+                    name: $contentBlock['name'],
+                    arguments: $contentBlock['input'] ?? [],
+                );
             }
         }
 

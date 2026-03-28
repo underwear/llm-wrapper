@@ -7,9 +7,15 @@ namespace Underwear\LlmWrapper\LlmResponse;
 class ToolCall
 {
     public function __construct(
+        private readonly string $id,
         private readonly string $name,
         private readonly array $arguments
     ) {}
+
+    public function getId(): string
+    {
+        return $this->id;
+    }
 
     public function getName(): string
     {
@@ -44,6 +50,7 @@ class ToolCall
     public function toArray(): array
     {
         return [
+            'id' => $this->id,
             'name' => $this->name,
             'arguments' => $this->arguments,
         ];

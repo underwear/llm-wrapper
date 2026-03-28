@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-8892BF.svg)](https://php.net/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Fluent PHP wrapper for LLM APIs. One interface for OpenAI, Anthropic Claude, and Kie.ai — with tool calling, structured parameters, and response normalization.
+Fluent PHP wrapper for LLM APIs. One interface for OpenAI, Anthropic Claude, and Kie.ai — with tool calling, agent loops, and response normalization.
 
 ```php
 $response = LlmClient::openai(['api_key' => 'sk-...'])
@@ -20,7 +20,7 @@ echo $response->text(); // Paris
 - **One API for all providers** — switch between OpenAI, Claude, and Kie.ai by changing one line
 - **Fluent builder** — readable, chainable, IDE-friendly
 - **Tool calling** — type-safe parameter definitions with JSON Schema generation
-- **Reusable tools** — define once, use across multiple chats
+- **Agent-ready** — tool call IDs, tool results, and conversation continuations built in
 - **Normalized responses** — consistent `stopReason`, `usage`, and `toolCalls` across providers
 
 ## Installation
@@ -116,8 +116,8 @@ $weatherTool = ToolBuilder::create('get_weather')
 $weatherTool->stringParam('city')->required();
 $weatherTool->stringParam('units')->enum(['celsius', 'fahrenheit']);
 
-$london  = $client->chat()->tool($weatherTool)->user('Weather in London?')->send();
-$tokyo   = $client->chat()->tool($weatherTool)->user('Weather in Tokyo?')->send();
+$london = $client->chat()->tool($weatherTool)->user('Weather in London?')->send();
+$tokyo  = $client->chat()->tool($weatherTool)->user('Weather in Tokyo?')->send();
 ```
 
 ### Multiple Tools
@@ -159,6 +159,63 @@ use Underwear\LlmWrapper\ChatBuilder\ToolChoice;
 ->toolChoice(ToolChoice::required())              // must call a tool
 ->toolChoice(ToolChoice::specific('tool_name'))   // must call this specific tool
 ->toolChoice(ToolChoice::none())                  // no tool calls
+```
+
+## Agent Loop
+
+The library provides primitives for building agents: tool call IDs, tool results, and conversation continuations. Models can call tools, you execute them and send results back, the model continues — until it's done.
+
+```php
+$chat = $client->chat()
+    ->system('You are a helpful assistant.')
+    ->user('What is the weather in Paris and London?')
+    ->tool('get_weather', function ($t) {
+        $t->description('Get current weather for a city');
+        $t->stringParam('city')->required();
+    })
+    ->toolChoice(ToolChoice::auto());
+
+$response = $chat->send();
+
+while ($response->stopReason() === 'tool_calls') {
+    // Add the assistant's tool-calling response to history
+    $chat->assistantToolCalls($response->tools(), $response->text());
+
+    // Execute each tool and send results back
+    foreach ($response->tools() as $call) {
+        $result = executeMyTool($call->getName(), $call->getArguments());
+        $chat->toolResult($call->getId(), $call->getName(), $result);
+    }
+
+    // Continue the conversation
+    $response = $chat->send();
+}
+
+echo $response->text();
+// "The weather in Paris is 22°C and sunny, while London is 15°C and rainy."
+```
+
+### How It Works
+
+1. **`$response->tools()`** returns all tool calls with their IDs (supports parallel calls)
+2. **`$chat->assistantToolCalls()`** adds the assistant's response back to the conversation
+3. **`$chat->toolResult($id, $name, $content)`** sends the tool execution result (string)
+4. **`$chat->send()`** continues — the model sees the results and either calls more tools or responds with text
+
+### Filtering Tool Calls
+
+```php
+// Get all tool calls
+$response->tools();
+
+// Filter by tool name (useful when model calls the same tool multiple times)
+$response->tools('get_weather');  // all get_weather calls
+
+// Get first match
+$response->tool('get_weather');   // first ToolCall or null
+
+// Check if called
+$response->called('get_weather'); // bool
 ```
 
 ## Parameter Types
@@ -213,11 +270,14 @@ $response->hasText();        // true
 // Tool calls
 $response->hasToolCalls();   // true/false
 $response->called('name');   // was this tool called?
-$response->tool('name');     // ToolCall object or null
+$response->tool('name');     // first ToolCall or null
 $response->tools();          // all ToolCall objects
+$response->tools('name');    // all ToolCall objects with this name
 
 // ToolCall
 $call = $response->tool('get_weather');
+$call->getId();              // "call_abc123"
+$call->getName();            // "get_weather"
 $call->get('city');          // "Paris"
 $call->get('units', 'c');   // with default value
 $call->city;                 // magic property
@@ -254,11 +314,11 @@ $client->afterMany($loggerHook, $metricsHook, $costTrackerHook);
 
 ## Supported Providers
 
-| Provider | Factory | Default Model | Auth |
-|----------|---------|---------------|------|
-| OpenAI | `LlmClient::openai()` | `gpt-4.1` | Bearer token |
-| Anthropic | `LlmClient::claude()` | `claude-sonnet-4-20250514` | `x-api-key` header |
-| Kie.ai | `LlmClient::kie()` | `gpt-5-4` | Bearer token |
+| Provider | Factory | Default Model | Tool Calling | Agent Loop |
+|----------|---------|---------------|-------------|------------|
+| OpenAI | `LlmClient::openai()` | `gpt-4.1` | parallel | yes |
+| Anthropic | `LlmClient::claude()` | `claude-sonnet-4-20250514` | parallel | yes |
+| Kie.ai | `LlmClient::kie()` | `gpt-5-4` | single | no |
 
 All providers use the same fluent API. Tool calls, stop reasons, and usage stats are normalized across providers.
 

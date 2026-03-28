@@ -62,7 +62,7 @@ class OpenAiDriver implements LlmDriverInterface
 
         $payload = [
             'model' => $model,
-            'messages' => $chatArray['messages'],
+            'messages' => $this->transformMessages($chatArray['messages']),
         ];
 
         if (isset($chatArray['temperature'])) {
@@ -82,6 +82,45 @@ class OpenAiDriver implements LlmDriverInterface
         }
 
         return $payload;
+    }
+
+    private function transformMessages(array $messages): array
+    {
+        $result = [];
+
+        foreach ($messages as $message) {
+            if ($message['role'] === 'tool_result') {
+                $result[] = [
+                    'role' => 'tool',
+                    'tool_call_id' => $message['tool_call_id'],
+                    'content' => $message['content'],
+                ];
+            } elseif (isset($message['_tool_calls'])) {
+                $apiMessage = [
+                    'role' => 'assistant',
+                    'content' => $message['content'] ?: null,
+                    'tool_calls' => [],
+                ];
+                foreach ($message['_tool_calls'] as $call) {
+                    $apiMessage['tool_calls'][] = [
+                        'id' => $call['id'],
+                        'type' => 'function',
+                        'function' => [
+                            'name' => $call['name'],
+                            'arguments' => json_encode($call['arguments']),
+                        ],
+                    ];
+                }
+                $result[] = $apiMessage;
+            } else {
+                $result[] = [
+                    'role' => $message['role'],
+                    'content' => $message['content'],
+                ];
+            }
+        }
+
+        return $result;
     }
 
     private function transformTools(array $tools): array
@@ -167,9 +206,11 @@ class OpenAiDriver implements LlmDriverInterface
         if (isset($message['tool_calls'])) {
             foreach ($message['tool_calls'] as $toolCall) {
                 if ($toolCall['type'] === 'function') {
-                    $name = $toolCall['function']['name'];
-                    $arguments = json_decode($toolCall['function']['arguments'] ?? '{}', true) ?: [];
-                    $toolCalls[$name] = new ToolCall($name, $arguments);
+                    $toolCalls[] = new ToolCall(
+                        id: $toolCall['id'],
+                        name: $toolCall['function']['name'],
+                        arguments: json_decode($toolCall['function']['arguments'] ?? '{}', true) ?: [],
+                    );
                 }
             }
         }

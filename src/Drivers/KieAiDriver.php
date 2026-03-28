@@ -161,9 +161,11 @@ class KieAiDriver implements LlmDriverInterface
         if (isset($message['tool_calls'])) {
             foreach ($message['tool_calls'] as $toolCall) {
                 if (($toolCall['type'] ?? '') === 'function') {
-                    $name = $toolCall['function']['name'];
-                    $arguments = json_decode($toolCall['function']['arguments'] ?? '{}', true) ?: [];
-                    $toolCalls[$name] = new ToolCall($name, $arguments);
+                    $toolCalls[] = new ToolCall(
+                        id: $toolCall['id'] ?? '',
+                        name: $toolCall['function']['name'],
+                        arguments: json_decode($toolCall['function']['arguments'] ?? '{}', true) ?: [],
+                    );
                 }
             }
         }
@@ -272,9 +274,11 @@ class KieAiDriver implements LlmDriverInterface
             }
 
             if ($block['type'] === 'function_call') {
-                $name = $block['name'] ?? '';
-                $arguments = json_decode($block['arguments'] ?? '{}', true) ?: [];
-                $toolCalls[$name] = new ToolCall($name, $arguments);
+                $toolCalls[] = new ToolCall(
+                    id: $block['call_id'] ?? $block['id'] ?? '',
+                    name: $block['name'] ?? '',
+                    arguments: json_decode($block['arguments'] ?? '{}', true) ?: [],
+                );
             }
         }
 

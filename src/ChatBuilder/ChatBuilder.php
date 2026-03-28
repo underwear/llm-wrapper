@@ -4,6 +4,7 @@ namespace Underwear\LlmWrapper\ChatBuilder;
 
 use Underwear\LlmWrapper\LlmClient;
 use Underwear\LlmWrapper\LlmResponse\LlmResponse;
+use Underwear\LlmWrapper\LlmResponse\ToolCall;
 
 class ChatBuilder
 {
@@ -52,6 +53,41 @@ class ChatBuilder
     public function assistant(string $content): self
     {
         $this->messages[] = ['role' => 'assistant', 'content' => $content];
+        return $this;
+    }
+
+    /**
+     * Append the assistant's tool-calling response to the conversation history.
+     * This preserves the tool call IDs needed to send results back.
+     *
+     * @param ToolCall[] $toolCalls
+     */
+    public function assistantToolCalls(array $toolCalls, string $content = ''): self
+    {
+        $calls = [];
+        foreach ($toolCalls as $call) {
+            $calls[] = $call->toArray();
+        }
+
+        $this->messages[] = [
+            'role' => 'assistant',
+            'content' => $content,
+            '_tool_calls' => $calls,
+        ];
+        return $this;
+    }
+
+    /**
+     * Add a tool result message to the conversation.
+     */
+    public function toolResult(string $toolCallId, string $name, string $content): self
+    {
+        $this->messages[] = [
+            'role' => 'tool_result',
+            'tool_call_id' => $toolCallId,
+            'name' => $name,
+            'content' => $content,
+        ];
         return $this;
     }
 

@@ -6,6 +6,9 @@ namespace Underwear\LlmWrapper\LlmResponse;
 
 class LlmResponse
 {
+    /**
+     * @param ToolCall[] $toolCalls Indexed array of tool calls
+     */
     public function __construct(
         private string $content,
         private array $toolCalls,
@@ -34,17 +37,37 @@ class LlmResponse
 
     public function called(string $toolName): bool
     {
-        return isset($this->toolCalls[$toolName]);
+        foreach ($this->toolCalls as $call) {
+            if ($call->getName() === $toolName) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public function tool(string $toolName): ?ToolCall
     {
-        return $this->toolCalls[$toolName] ?? null;
+        foreach ($this->toolCalls as $call) {
+            if ($call->getName() === $toolName) {
+                return $call;
+            }
+        }
+        return null;
     }
 
-    public function tools(): array
+    /**
+     * @return ToolCall[]
+     */
+    public function tools(?string $toolName = null): array
     {
-        return $this->toolCalls;
+        if ($toolName === null) {
+            return $this->toolCalls;
+        }
+
+        return array_values(array_filter(
+            $this->toolCalls,
+            fn(ToolCall $call) => $call->getName() === $toolName,
+        ));
     }
 
     // ===== Stop Reason =====
@@ -91,11 +114,8 @@ class LlmResponse
     private function getToolCallsAsArray(): array
     {
         $result = [];
-        foreach ($this->toolCalls as $name => $call) {
-            $result[$name] = [
-                'name' => $call->getName(),
-                'arguments' => $call->getArguments(),
-            ];
+        foreach ($this->toolCalls as $call) {
+            $result[] = $call->toArray();
         }
         return $result;
     }
